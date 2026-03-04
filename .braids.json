@@ -1,0 +1,9 @@
+{
+  "config_version": 1,
+  "mirrors": {
+    "vendor/agent-validate": {
+      "url": "https://github.com/sheurich/agent-validate.git",
+      "revision": "6fba297653789fa13e613fc5b6a825af82767557"
+    }
+  }
+}

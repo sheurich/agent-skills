@@ -1,0 +1,89 @@
+---
+name: agent-validate
+description: Cross-agent plugin/extension/skill validation
+branding:
+  icon: check-circle
+  color: green
+
+inputs:
+  path:
+    description: Directory to validate (default repo root)
+    required: false
+    default: "."
+  skip:
+    description: Comma-separated checks to skip
+    required: false
+    default: ""
+  jsonlint-version:
+    description: jsonlint-mod version
+    required: false
+    default: "1.7.6"
+  yamllint-version:
+    description: yamllint version
+    required: false
+    default: "1.37.0"
+  markdownlint-version:
+    description: markdownlint-cli version
+    required: false
+    default: "0.47.0"
+  ruff-version:
+    description: ruff version
+    required: false
+    default: "0.14.14"
+  claude-code-version:
+    description: claude-code version
+    required: false
+    default: "2.1.22"
+  gemini-cli-version:
+    description: gemini-cli version
+    required: false
+    default: "0.26.0"
+  typescript-version:
+    description: typescript version
+    required: false
+    default: "5.8.3"
+
+outputs:
+  result:
+    description: "'pass' or 'fail'"
+    value: ${{ steps.validate.outputs.result }}
+  error-count:
+    description: Number of validation errors
+    value: ${{ steps.validate.outputs.error-count }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238  # v6.2.0
+      with:
+        node-version: "22"
+
+    - name: Set up Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+      with:
+        python-version: "3.13"
+
+    - name: Install system tools
+      shell: bash
+      env:
+        YAMLLINT_VERSION: ${{ inputs.yamllint-version }}
+        RUFF_VERSION: ${{ inputs.ruff-version }}
+      run: |
+        pip install --quiet "yamllint==${YAMLLINT_VERSION}" "ruff==${RUFF_VERSION}"
+
+    - name: Run validation
+      id: validate
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        VALIDATE_SKIP: ${{ inputs.skip }}
+        JSONLINT_VERSION: ${{ inputs.jsonlint-version }}
+        YAMLLINT_VERSION: ${{ inputs.yamllint-version }}
+        MARKDOWNLINT_VERSION: ${{ inputs.markdownlint-version }}
+        RUFF_VERSION: ${{ inputs.ruff-version }}
+        CLAUDE_CODE_VERSION: ${{ inputs.claude-code-version }}
+        GEMINI_CLI_VERSION: ${{ inputs.gemini-cli-version }}
+        TYPESCRIPT_VERSION: ${{ inputs.typescript-version }}
+      run: |
+        ${{ github.action_path }}/validate.sh "$INPUT_PATH"

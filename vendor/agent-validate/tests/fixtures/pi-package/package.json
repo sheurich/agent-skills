@@ -1,0 +1,11 @@
+{
+  "name": "test-pi-package",
+  "version": "1.0.0",
+  "description": "A test Pi package",
+  "pi": {
+    "skills": "./skills"
+  },
+  "keywords": [
+    "pi-package"
+  ]
+}

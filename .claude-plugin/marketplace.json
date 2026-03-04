@@ -1,0 +1,19 @@
+{
+  "name": "sheurich-agent-skills",
+  "owner": {
+    "name": "Shiloh Heurich"
+  },
+  "metadata": {
+    "description": "Agent skills by Shiloh Heurich",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "skills",
+      "description": "Agent skills collection",
+      "source": "./skills",
+      "strict": false,
+      "skills": []
+    }
+  ]
+}
