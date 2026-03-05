@@ -25,7 +25,7 @@ argument-hint: "<query>"
 
 | Field | Required | Purpose |
 |-------|----------|---------|
-| `name` | Yes | Must match folder name. Lowercase, hyphens only, <64 chars |
+| `name` | Yes | Must match folder name. Lowercase alphanumeric and hyphens, <64 chars |
 | `description` | Yes | Activation trigger. Max 1024 chars |
 | `compatibility` | No | Runtime requirements (prose). Max 500 chars |
 | `license` | No | SPDX license identifier |

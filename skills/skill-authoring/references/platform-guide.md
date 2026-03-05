@@ -40,9 +40,8 @@ full tool access in Gemini.
   platform-specific config.
 - Agent-specific features (allowed-tools, hooks, MCP, LSP) require
   the plugin layout and only function in Claude Code.
-- Private repos work most reliably with SSH URLs
-  (`git@github.com:...`). HTTPS with token auth is supported by
-  some platforms but may fail silently.
+- Private repos work with SSH URLs (`git@github.com:...`) or
+  HTTPS with credential helpers / tokens (`GITHUB_TOKEN`, etc.).
 - `README.md` at plugin root is never loaded into agent context.
   It serves humans only.
 
