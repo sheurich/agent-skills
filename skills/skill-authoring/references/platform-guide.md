@@ -11,7 +11,7 @@ Versions tested: Claude Code 2.1.69, Gemini CLI 0.31.0, Pi 0.56.0.
 | Concern | Claude Code | Gemini CLI | Pi |
 |---------|-------------|------------|-----|
 | Skill location | `skills/<name>/SKILL.md` | Same | Same |
-| Root context | `CLAUDE.md` | `GEMINI.md` or `contextFileName` | `AGENTS.md` |
+| Root context | `CLAUDE.md` | `GEMINI.md` or `contextFileName` | `AGENTS.md` or `CLAUDE.md` |
 | Plugin manifest | `.claude-plugin/plugin.json` | `gemini-extension.json` | `package.json` (with `pi-package` keyword) |
 | Marketplace manifest | `.claude-plugin/marketplace.json` | — | — |
 | Skill invocation | `/plugin:skill` or automatic | Natural language or `/skill` | `/skill:name` or automatic |
@@ -69,6 +69,13 @@ vary in support:
 | `disable-model-invocation` | Enforced | Ignored | Enforced | CC-only |
 | `context` | Enforced (`fork`) | Ignored | Ignored | CC-only |
 | `agent` | Enforced | Ignored | Ignored | CC-only |
+
+**CI caveat:** `disable-model-invocation`, `context`, and `agent`
+are valid in Claude Code and Pi but are **not** in the Agent Skills
+spec allowlist. Repos using `agent-validate` will reject them as
+unexpected frontmatter fields. Use these fields only in plugins
+distributed outside spec-validated repos, or add them to your
+repo's `known_extensions` list in `validate.sh`.
 
 **Implication:** Tool restrictions set via `allowed-tools` don't
 transfer to Gemini CLI. A skill restricted to Read and Grep in
@@ -179,5 +186,5 @@ Skill instructions should use generic descriptions ("read the file",
 | Edit | `replace` | edit |
 | Bash | `run_shell_command` | bash |
 | Glob | `glob` | — |
-| Grep | `search_file_content` | — |
+| Grep | `search_file_content` | grep |
 | WebFetch | `web_fetch` | — |
