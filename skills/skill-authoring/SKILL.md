@@ -1,6 +1,6 @@
 ---
 name: skill-authoring
-description: Write and refine agent skills using test-driven development. Use when creating new skills, editing existing skills, or reviewing skill quality.
+description: Write and refine agent skills. Use when creating, editing, or reviewing skills, or when asking about SKILL.md format, frontmatter fields, progressive disclosure, or cross-agent distribution.
 ---
 
 # Skill Authoring
