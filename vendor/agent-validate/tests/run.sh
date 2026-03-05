@@ -534,6 +534,59 @@ assert_fail_stderr "marketplace-malformed-subplugin: reports invalid sub-plugin 
     "is not valid JSON" \
     "$FIXTURES/marketplace-malformed-subplugin" --skip "$SKIP_EXTERNAL"
 
+# --- P3: Gemini extension field allowlist ---
+
+assert_fail_stderr "gemini-unknown-field: rejects unknown gemini-extension.json field" \
+    "gemini-extension.json has unrecognized fields.*bogus_field" \
+    "$FIXTURES/gemini-unknown-field" --skip "$SKIP_EXTERNAL"
+
+assert_fail_stderr "marketplace-gemini-bad-fields: per-plugin Gemini allowlist catches bogus fields" \
+    "gemini-extension.json has unrecognized fields.*bogus_gemini_field" \
+    "$FIXTURES/marketplace-gemini-bad-fields" --skip "$SKIP_EXTERNAL"
+
+# --- P4: Cross-check mismatch coverage (ge↔pi, pj↔pi, triple) ---
+
+assert_fail_stderr "crosscheck-ge-pi-mismatch: detects ge↔pi name mismatch" \
+    "Name mismatch.*gemini-extension.json.*package.json" \
+    "$FIXTURES/crosscheck-ge-pi-mismatch" --skip "$SKIP_EXTERNAL"
+
+assert_fail_stderr "crosscheck-ge-pi-mismatch: detects ge↔pi version mismatch" \
+    "Version mismatch.*gemini-extension.json.*package.json" \
+    "$FIXTURES/crosscheck-ge-pi-mismatch" --skip "$SKIP_EXTERNAL"
+
+assert_fail_stderr "crosscheck-ge-pi-mismatch: detects ge↔pi description mismatch" \
+    "Description mismatch.*gemini-extension.json.*package.json" \
+    "$FIXTURES/crosscheck-ge-pi-mismatch" --skip "$SKIP_EXTERNAL"
+
+assert_fail_stderr "crosscheck-pj-pi-mismatch: detects pj↔pi name mismatch" \
+    "Name mismatch.*plugin.json.*package.json" \
+    "$FIXTURES/crosscheck-pj-pi-mismatch" --skip "$SKIP_EXTERNAL"
+
+assert_fail_stderr "crosscheck-pj-pi-mismatch: detects pj↔pi version mismatch" \
+    "Version mismatch.*plugin.json.*package.json" \
+    "$FIXTURES/crosscheck-pj-pi-mismatch" --skip "$SKIP_EXTERNAL"
+
+assert_fail_stderr "crosscheck-pj-pi-mismatch: detects pj↔pi description mismatch" \
+    "Description mismatch.*plugin.json.*package.json" \
+    "$FIXTURES/crosscheck-pj-pi-mismatch" --skip "$SKIP_EXTERNAL"
+
+assert_fail_stderr "crosscheck-triple-mismatch: detects all three-way name mismatches" \
+    "Name mismatch" \
+    "$FIXTURES/crosscheck-triple-mismatch" --skip "$SKIP_EXTERNAL"
+
+assert_fail_stderr "crosscheck-triple-mismatch: detects all three-way version mismatches" \
+    "Version mismatch" \
+    "$FIXTURES/crosscheck-triple-mismatch" --skip "$SKIP_EXTERNAL"
+
+assert_fail_stderr "crosscheck-triple-mismatch: detects all three-way description mismatches" \
+    "Description mismatch" \
+    "$FIXTURES/crosscheck-triple-mismatch" --skip "$SKIP_EXTERNAL"
+
+# --- P5: Codex/OpenCode markdown lint ---
+
+assert_fail "codex-broken-markdown: codex detects markdown lint errors in AGENTS.md" \
+    "$FIXTURES/codex-broken-markdown" --skip "json,yaml,markdown,shell,python,claude,gemini,pi,opencode,crosscheck,skills"
+
 # --- P1 #10: dependency-missing paths ---
 
 test_missing_jq() {
@@ -593,6 +646,546 @@ test_vendor_exclusion() {
     fi
 }
 test_vendor_exclusion
+
+# --- Tier 3: --check-deploy flag ---
+
+test_check_deploy_flag() {
+    local name="--check-deploy flag is accepted"
+    if [[ -n "$FILTER" ]] && [[ "$name" != *"$FILTER"* ]]; then
+        skipped=$((skipped + 1))
+        return
+    fi
+    # --check-deploy on empty-dir should pass (no platforms detected)
+    if "$VALIDATE" --check-deploy "$FIXTURES/empty-dir" \
+        --skip "$SKIP_EXTERNAL" >/dev/null 2>&1; then
+        echo "PASS: $name"
+        passed=$((passed + 1))
+    else
+        echo "FAIL: $name (expected exit 0)" >&2
+        failed=$((failed + 1))
+    fi
+}
+test_check_deploy_flag
+
+test_deploy_claude_check() {
+    local name="deploy-claude: parses claude plugin list JSON correctly"
+    if [[ -n "$FILTER" ]] && [[ "$name" != *"$FILTER"* ]]; then
+        skipped=$((skipped + 1))
+        return
+    fi
+    # Create temp dir with a canned JSON file and a stub claude script
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    trap 'rm -rf "$tmpdir"' RETURN
+
+    # Stub claude that returns canned JSON
+    cat > "$tmpdir/claude" << 'STUBEOF'
+#!/usr/bin/env bash
+if [[ "$*" == *"marketplace list"*"--json"* ]]; then
+    echo '[{"name":"test-marketplace"}]'
+elif [[ "$*" == *"plugin list"*"--json"* ]]; then
+    echo '[{"id":"test-plugin@test-marketplace","enabled":true}]'
+fi
+STUBEOF
+    chmod +x "$tmpdir/claude"
+
+    # Fixture: standalone plugin with marketplace
+    mkdir -p "$tmpdir/fix/.claude-plugin"
+    cat > "$tmpdir/fix/.claude-plugin/plugin.json" << 'EOF'
+{"name":"test-plugin","version":"1.0.0"}
+EOF
+    cat > "$tmpdir/fix/.claude-plugin/marketplace.json" << 'EOF'
+{"name":"test-marketplace","owner":{"name":"o"},"plugins":[
+  {"name":"test-plugin","source":"plugins/tp","version":"1.0.0"}
+]}
+EOF
+    mkdir -p "$tmpdir/fix/plugins/tp/.claude-plugin"
+    echo '{"name":"test-plugin","version":"1.0.0"}' \
+        > "$tmpdir/fix/plugins/tp/.claude-plugin/plugin.json"
+
+    local output
+    if output=$(PATH="$tmpdir:$PATH" "$VALIDATE" --check-deploy \
+        --skip "$SKIP_EXTERNAL" "$tmpdir/fix" 2>&1); then
+        if echo "$output" | grep -q "test-plugin.*installed"; then
+            echo "PASS: $name"
+            passed=$((passed + 1))
+        else
+            echo "FAIL: $name (missing expected output)" >&2
+            echo "  Got: $output" >&2
+            failed=$((failed + 1))
+        fi
+    else
+        echo "FAIL: $name (expected exit 0)" >&2
+        echo "  Got: $output" >&2
+        failed=$((failed + 1))
+    fi
+}
+test_deploy_claude_check
+
+test_deploy_gemini_check() {
+    local name="deploy-gemini: parses gemini extensions list JSON correctly"
+    if [[ -n "$FILTER" ]] && [[ "$name" != *"$FILTER"* ]]; then
+        skipped=$((skipped + 1))
+        return
+    fi
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    trap 'rm -rf "$tmpdir"' RETURN
+
+    # Stub gemini
+    cat > "$tmpdir/gemini" << 'STUBEOF'
+#!/usr/bin/env bash
+echo '[{"name":"test-ext","version":"1.0.0","isActive":true}]'
+STUBEOF
+    chmod +x "$tmpdir/gemini"
+
+    # Fixture
+    cat > "$tmpdir/gemini-extension.json" << 'EOF'
+{"name":"test-ext","version":"1.0.0"}
+EOF
+
+    local output
+    if output=$(PATH="$tmpdir:$PATH" "$VALIDATE" --check-deploy \
+        --skip "$SKIP_EXTERNAL" "$tmpdir" 2>&1); then
+        if echo "$output" | grep -q "test-ext.*enabled"; then
+            echo "PASS: $name"
+            passed=$((passed + 1))
+        else
+            echo "FAIL: $name (missing expected output)" >&2
+            echo "  Got: $output" >&2
+            failed=$((failed + 1))
+        fi
+    else
+        echo "FAIL: $name (expected exit 0)" >&2
+        echo "  Got: $output" >&2
+        failed=$((failed + 1))
+    fi
+}
+test_deploy_gemini_check
+
+test_deploy_skills_hub() {
+    local name="deploy-skills-hub: checks skill directories exist"
+    if [[ -n "$FILTER" ]] && [[ "$name" != *"$FILTER"* ]]; then
+        skipped=$((skipped + 1))
+        return
+    fi
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    trap 'rm -rf "$tmpdir"' RETURN
+
+    # Create fake HOME with skills hub
+    mkdir -p "$tmpdir/home/.agents/skills/my-skill"
+    mkdir -p "$tmpdir/fix/skills/my-skill"
+    cat > "$tmpdir/fix/skills/my-skill/SKILL.md" << 'EOF'
+---
+name: my-skill
+description: test skill
+---
+# My Skill
+EOF
+
+    local output
+    if output=$(HOME="$tmpdir/home" "$VALIDATE" --check-deploy \
+        --skip "$SKIP_EXTERNAL" "$tmpdir/fix" 2>&1); then
+        if echo "$output" | grep -q "my-skill.*found"; then
+            echo "PASS: $name"
+            passed=$((passed + 1))
+        else
+            echo "FAIL: $name (missing expected output)" >&2
+            echo "  Got: $output" >&2
+            failed=$((failed + 1))
+        fi
+    else
+        echo "FAIL: $name (expected exit 0)" >&2
+        echo "  Got: $output" >&2
+        failed=$((failed + 1))
+    fi
+}
+test_deploy_skills_hub
+
+test_deploy_skills_hub_missing() {
+    local name="deploy-skills-hub-missing: detects missing skill directory"
+    if [[ -n "$FILTER" ]] && [[ "$name" != *"$FILTER"* ]]; then
+        skipped=$((skipped + 1))
+        return
+    fi
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    trap 'rm -rf "$tmpdir"' RETURN
+
+    # Create fake HOME WITHOUT skills hub entry
+    mkdir -p "$tmpdir/home/.agents/skills"
+    mkdir -p "$tmpdir/fix/skills/missing-skill"
+    cat > "$tmpdir/fix/skills/missing-skill/SKILL.md" << 'EOF'
+---
+name: missing-skill
+description: test skill
+---
+# Missing Skill
+EOF
+
+    local stderr_output
+    stderr_output=$(HOME="$tmpdir/home" "$VALIDATE" --check-deploy \
+        --skip "$SKIP_EXTERNAL" "$tmpdir/fix" 2>&1 >/dev/null) || true
+    if echo "$stderr_output" | grep -q "missing-skill.*not found"; then
+        echo "PASS: $name"
+        passed=$((passed + 1))
+    else
+        echo "FAIL: $name (missing expected error)" >&2
+        echo "  Got: $stderr_output" >&2
+        failed=$((failed + 1))
+    fi
+}
+test_deploy_skills_hub_missing
+
+test_deploy_skills_hub_no_dir() {
+    local name="deploy-skills-hub-no-dir: detects missing hub directory"
+    if [[ -n "$FILTER" ]] && [[ "$name" != *"$FILTER"* ]]; then
+        skipped=$((skipped + 1))
+        return
+    fi
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    trap 'rm -rf "$tmpdir"' RETURN
+
+    # Create fake HOME WITHOUT .agents/skills/ directory at all
+    mkdir -p "$tmpdir/home"
+    mkdir -p "$tmpdir/fix/skills/orphan-skill"
+    cat > "$tmpdir/fix/skills/orphan-skill/SKILL.md" << 'EOF'
+---
+name: orphan-skill
+description: test skill
+---
+# Orphan Skill
+EOF
+
+    local stderr_output
+    stderr_output=$(HOME="$tmpdir/home" "$VALIDATE" --check-deploy \
+        --skip "$SKIP_EXTERNAL" "$tmpdir/fix" 2>&1 >/dev/null) || true
+    if echo "$stderr_output" | grep -q "hub directory.*not found"; then
+        echo "PASS: $name"
+        passed=$((passed + 1))
+    else
+        echo "FAIL: $name (missing expected error)" >&2
+        echo "  Got: $stderr_output" >&2
+        failed=$((failed + 1))
+    fi
+}
+test_deploy_skills_hub_no_dir
+
+test_deploy_claude_missing() {
+    local name="deploy-claude-missing: detects missing plugin"
+    if [[ -n "$FILTER" ]] && [[ "$name" != *"$FILTER"* ]]; then
+        skipped=$((skipped + 1))
+        return
+    fi
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    trap 'rm -rf "$tmpdir"' RETURN
+
+    # Stub claude that returns empty lists
+    cat > "$tmpdir/claude" << 'STUBEOF'
+#!/usr/bin/env bash
+echo '[]'
+STUBEOF
+    chmod +x "$tmpdir/claude"
+
+    # Fixture with a plugin that won't be in the list
+    mkdir -p "$tmpdir/fix/.claude-plugin"
+    echo '{"name":"ghost-plugin","version":"1.0.0"}' \
+        > "$tmpdir/fix/.claude-plugin/plugin.json"
+
+    local stderr_output
+    stderr_output=$(PATH="$tmpdir:$PATH" "$VALIDATE" --check-deploy \
+        --skip "$SKIP_EXTERNAL" "$tmpdir/fix" 2>&1 >/dev/null) || true
+    if echo "$stderr_output" | grep -q "ghost-plugin.*not installed"; then
+        echo "PASS: $name"
+        passed=$((passed + 1))
+    else
+        echo "FAIL: $name (missing expected error)" >&2
+        echo "  Got: $stderr_output" >&2
+        failed=$((failed + 1))
+    fi
+}
+test_deploy_claude_missing
+
+test_deploy_gemini_disabled() {
+    local name="deploy-gemini-disabled: detects disabled extension"
+    if [[ -n "$FILTER" ]] && [[ "$name" != *"$FILTER"* ]]; then
+        skipped=$((skipped + 1))
+        return
+    fi
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    trap 'rm -rf "$tmpdir"' RETURN
+
+    # Stub gemini that returns a disabled extension
+    cat > "$tmpdir/gemini" << 'STUBEOF'
+#!/usr/bin/env bash
+echo '[{"name":"disabled-ext","version":"1.0.0","isActive":false}]'
+STUBEOF
+    chmod +x "$tmpdir/gemini"
+
+    cat > "$tmpdir/gemini-extension.json" << 'EOF'
+{"name":"disabled-ext","version":"1.0.0"}
+EOF
+
+    local stderr_output
+    stderr_output=$(PATH="$tmpdir:$PATH" "$VALIDATE" --check-deploy \
+        --skip "$SKIP_EXTERNAL" "$tmpdir" 2>&1 >/dev/null) || true
+    if echo "$stderr_output" | grep -q "disabled-ext.*disabled"; then
+        echo "PASS: $name"
+        passed=$((passed + 1))
+    else
+        echo "FAIL: $name (missing expected error)" >&2
+        echo "  Got: $stderr_output" >&2
+        failed=$((failed + 1))
+    fi
+}
+test_deploy_gemini_disabled
+
+test_deploy_off_by_default() {
+    local name="deploy-off-by-default: tier 3 does not run without --check-deploy"
+    if [[ -n "$FILTER" ]] && [[ "$name" != *"$FILTER"* ]]; then
+        skipped=$((skipped + 1))
+        return
+    fi
+    # Run against standalone-plugin (which has a claude plugin.json) without
+    # --check-deploy. Should NOT produce any "Checking deployment" output.
+    local output
+    output=$("$VALIDATE" --skip "$SKIP_EXTERNAL" "$FIXTURES/standalone-plugin" 2>&1)
+    if echo "$output" | grep -q "Checking deployment"; then
+        echo "FAIL: $name (deployment checks ran without --check-deploy)" >&2
+        failed=$((failed + 1))
+    else
+        echo "PASS: $name"
+        passed=$((passed + 1))
+    fi
+}
+test_deploy_off_by_default
+
+# --- Meta-tests: consistency and traceability ---
+
+# Test 1: Ref-comment line accuracy
+# Every # Ref: comment in validate.sh must cite a file that exists in
+# references/ and line numbers that fall within the file's line count.
+test_ref_comment_accuracy() {
+    local name="ref-comments: cited files exist and line numbers are in range"
+    if [[ -n "$FILTER" ]] && [[ "$name" != *"$FILTER"* ]]; then
+        skipped=$((skipped + 1))
+        return
+    fi
+    local refs_dir="$REPO_ROOT/skills/spec-conformance/references"
+    local errs=()
+    while IFS= read -r line; do
+        # Extract file and line spec from "# Ref: <file> L<spec>"
+        local ref_file ref_lines
+        ref_file=$(echo "$line" | sed -E 's/.*# Ref: ([^ ]+) L.*/\1/')
+        ref_lines=$(echo "$line" | sed -E 's/.*# Ref: [^ ]+ L([0-9,L-]+).*/\1/')
+
+        if [[ ! -f "$refs_dir/$ref_file" ]]; then
+            errs+=("missing file: $ref_file")
+            continue
+        fi
+
+        local total
+        total=$(wc -l < "$refs_dir/$ref_file" | tr -d ' ')
+
+        # Parse line numbers from specs like "49", "49-54", "49,L59",
+        # "L296-L340", "L156,L167"
+        local nums
+        nums=$(echo "$ref_lines" | tr ',L' '\n ' | sed 's/-/\n/g' | tr -s ' \n' '\n' | grep -E '^[0-9]+$')
+        while IFS= read -r num; do
+            [[ -z "$num" ]] && continue
+            if (( num > total )); then
+                errs+=("$ref_file L$num out of range (file has $total lines)")
+            fi
+        done <<< "$nums"
+    done < <(grep '# Ref:' "$VALIDATE" | grep -E 'L[0-9]')
+
+    if [[ ${#errs[@]} -eq 0 ]]; then
+        echo "PASS: $name"
+        passed=$((passed + 1))
+    else
+        echo "FAIL: $name" >&2
+        for e in "${errs[@]}"; do
+            echo "  $e" >&2
+        done
+        failed=$((failed + 1))
+    fi
+}
+test_ref_comment_accuracy
+
+# Test 2: Vendored file inventory consistency
+# Every file in references/ must be cited in spec-freshness.yml and SKILL.md.
+# Every file cited in spec-freshness.yml must exist in references/.
+test_vendored_inventory() {
+    local name="vendored-inventory: references/, spec-freshness.yml, and SKILL.md agree"
+    if [[ -n "$FILTER" ]] && [[ "$name" != *"$FILTER"* ]]; then
+        skipped=$((skipped + 1))
+        return
+    fi
+    local refs_dir="$REPO_ROOT/skills/spec-conformance/references"
+    local freshness="$REPO_ROOT/.github/workflows/spec-freshness.yml"
+    local skillmd="$REPO_ROOT/skills/spec-conformance/SKILL.md"
+    local errs=()
+
+    # Files on disk
+    local disk_files
+    disk_files=$(find "$refs_dir" -maxdepth 1 -type f -exec basename {} \; | sort)
+
+    # Files referenced in spec-freshness.yml (REFS_DIR}/filename patterns)
+    local freshness_files
+    freshness_files=$(grep -oE 'REFS_DIR\}/[^"]+' "$freshness" \
+        | sed 's|REFS_DIR}/||' | sort -u)
+
+    # Files referenced in SKILL.md (references/filename patterns)
+    local skillmd_files
+    skillmd_files=$(grep -oE 'references/[^ )`]+' "$skillmd" \
+        | sed 's|references/||' | sort -u)
+
+    # Check: every disk file in freshness
+    while IFS= read -r f; do
+        if ! echo "$freshness_files" | grep -qF "$f"; then
+            errs+=("$f on disk but not in spec-freshness.yml")
+        fi
+    done <<< "$disk_files"
+
+    # Check: every disk file in SKILL.md
+    while IFS= read -r f; do
+        if ! echo "$skillmd_files" | grep -qF "$f"; then
+            errs+=("$f on disk but not in SKILL.md")
+        fi
+    done <<< "$disk_files"
+
+    # Check: every freshness file on disk
+    while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
+        if [[ ! -f "$refs_dir/$f" ]]; then
+            errs+=("$f in spec-freshness.yml but not on disk")
+        fi
+    done <<< "$freshness_files"
+
+    if [[ ${#errs[@]} -eq 0 ]]; then
+        echo "PASS: $name"
+        passed=$((passed + 1))
+    else
+        echo "FAIL: $name" >&2
+        for e in "${errs[@]}"; do
+            echo "  $e" >&2
+        done
+        failed=$((failed + 1))
+    fi
+}
+test_vendored_inventory
+
+# Test 3: CLI-regression fixture paths exist
+# Every tests/fixtures/ path in cli-regression.yml must exist on disk.
+test_cli_regression_fixtures() {
+    local name="cli-regression-fixtures: all referenced fixture paths exist"
+    if [[ -n "$FILTER" ]] && [[ "$name" != *"$FILTER"* ]]; then
+        skipped=$((skipped + 1))
+        return
+    fi
+    local workflow="$REPO_ROOT/.github/workflows/cli-regression.yml"
+    if [[ ! -f "$workflow" ]]; then
+        echo "SKIP: $name (cli-regression.yml not found)"
+        skipped=$((skipped + 1))
+        return
+    fi
+    local errs=()
+    while IFS= read -r fixture_path; do
+        [[ -z "$fixture_path" ]] && continue
+        if [[ ! -e "$REPO_ROOT/$fixture_path" ]]; then
+            errs+=("$fixture_path does not exist")
+        fi
+    done < <(grep -oE 'tests/fixtures/[^ "]+' "$workflow" | sort -u)
+
+    if [[ ${#errs[@]} -eq 0 ]]; then
+        echo "PASS: $name"
+        passed=$((passed + 1))
+    else
+        echo "FAIL: $name" >&2
+        for e in "${errs[@]}"; do
+            echo "  $e" >&2
+        done
+        failed=$((failed + 1))
+    fi
+}
+test_cli_regression_fixtures
+
+# Test 4: Workflow structural validation (actionlint)
+test_actionlint() {
+    local name="actionlint: workflow files are structurally valid"
+    if [[ -n "$FILTER" ]] && [[ "$name" != *"$FILTER"* ]]; then
+        skipped=$((skipped + 1))
+        return
+    fi
+    if ! command -v actionlint >/dev/null 2>&1; then
+        echo "SKIP: $name (actionlint not installed)"
+        skipped=$((skipped + 1))
+        return
+    fi
+    local output
+    if output=$(actionlint "$REPO_ROOT/.github/workflows/"*.yml 2>&1); then
+        echo "PASS: $name"
+        passed=$((passed + 1))
+    else
+        echo "FAIL: $name" >&2
+        echo "$output" >&2
+        failed=$((failed + 1))
+    fi
+}
+test_actionlint
+
+# Test 5: Skip-value documentation parity
+# Values listed in usage() must match values passed to should_skip in the script.
+test_skip_parity() {
+    local name="skip-parity: usage() documents all should_skip values and vice versa"
+    if [[ -n "$FILTER" ]] && [[ "$name" != *"$FILTER"* ]]; then
+        skipped=$((skipped + 1))
+        return
+    fi
+    # Extract skip values from usage() block (indented words between
+    # "Skip values:" and the next blank line)
+    local usage_vals
+    usage_vals=$(sed -n '/^Skip values:/,/^$/p' "$VALIDATE" \
+        | grep -E '^\s+\S+' | awk '{print $1}' | sort)
+
+    # Extract skip values from should_skip calls
+    local code_vals
+    code_vals=$(grep -oE 'should_skip "[^"]+"' "$VALIDATE" \
+        | sed 's/should_skip "//;s/"//' | sort -u)
+
+    local errs=()
+    # Every usage value must appear in code
+    while IFS= read -r v; do
+        [[ -z "$v" ]] && continue
+        if ! echo "$code_vals" | grep -qxF "$v"; then
+            errs+=("'$v' in usage() but no should_skip call")
+        fi
+    done <<< "$usage_vals"
+
+    # Every code value must appear in usage
+    while IFS= read -r v; do
+        [[ -z "$v" ]] && continue
+        if ! echo "$usage_vals" | grep -qxF "$v"; then
+            errs+=("'$v' in should_skip call but not in usage()")
+        fi
+    done <<< "$code_vals"
+
+    if [[ ${#errs[@]} -eq 0 ]]; then
+        echo "PASS: $name"
+        passed=$((passed + 1))
+    else
+        echo "FAIL: $name" >&2
+        for e in "${errs[@]}"; do
+            echo "  $e" >&2
+        done
+        failed=$((failed + 1))
+    fi
+}
+test_skip_parity
 
 echo ""
 if [[ -n "$FILTER" ]]; then

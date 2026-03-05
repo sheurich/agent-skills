@@ -89,17 +89,17 @@ Source types: relative paths, GitHub repos (`github:owner/repo`), git URLs, npm 
 ### Gemini CLI gemini-extension.json
 
 **Source:** `https://github.com/google-gemini/gemini-cli/blob/main/docs/extensions/reference.md`
-**TypeScript interface:** `https://github.com/google-gemini/gemini-cli/blob/main/packages/a2a-server/src/config/extension.ts`
+**TypeScript interface:** `https://github.com/google-gemini/gemini-cli/blob/main/packages/cli/src/config/extension.ts`
 **Vendored:** `references/gemini-extension-reference.md`, `references/gemini-extension-config.ts`
-**Last verified:** 2026-02-26
+**Last verified:** 2026-03-04
 
-Interface fields: `name` (string, required), `version` (string, required), `mcpServers` (optional), `contextFileName` (string or string[], optional), `excludeTools` (string[], optional).
+Interface fields: `name` (string, required), `version` (string, required), `mcpServers` (optional), `contextFileName` (string or string[], optional), `excludeTools` (string[], optional), `settings` (ExtensionSetting[], optional), `themes` (CustomTheme[], optional), `plan` (object with optional `directory`, optional).
 
-Documentation also mentions: `description`, `settings` array, `themes` array.
+Documentation also mentions: `description`, policy engine (`.toml` files in `policies/` directory).
 
 `contextFileName` can be a string or array of strings. If omitted and `GEMINI.md` exists, that file is loaded. When an array, each entry is resolved independently.
 
-**What validate.sh checks:** Cross-checks `name`, `version`, `description` against plugin.json/package.json. Validates `contextFileName` file(s) exist — handles both string and array forms. Validates `name` format (lowercase alphanumeric with dashes). Handles malformed JSON gracefully.
+**What validate.sh checks:** Cross-checks `name`, `version`, `description` against plugin.json/package.json. Validates `contextFileName` file(s) exist — handles both string and array forms. Validates `name` format (lowercase alphanumeric with dashes). **Field allowlist** covering all `ExtensionConfig` interface fields: `name`, `version`, `description`, `mcpServers`, `contextFileName`, `excludeTools`, `settings`, `themes`, `plan` — rejects any key not in the allowlist. Handles malformed JSON gracefully.
 
 ### Pi package.json
 
@@ -115,6 +115,55 @@ Pi packages should include `"keywords": ["pi-package"]` for discovery.
 
 **What validate.sh checks:** Extracts top-level `.pi` entry values via `jq`, verifies each resolves as a path. Warns if `keywords` does not include `"pi-package"`. Also checks for TypeScript syntax in `extensions/*.ts`.
 
+### Codex (AGENTS.md / codex.md)
+
+**Source:** No formal specification. Codex uses `AGENTS.md` (shared with OpenCode) and `codex.md` for agent instructions.
+
+**What validate.sh checks:** Detects presence of `AGENTS.md` and/or `codex.md`. Runs markdownlint on detected files (unless `markdown` is skipped). No structural validation beyond markdown lint — no known schema or field requirements exist yet.
+
+**What validate.sh doesn't check:** File content structure, frontmatter, or any Codex-specific conventions. If Codex publishes a spec in the future, add structural checks here.
+
+### OpenCode (AGENTS.md)
+
+**Source:** No formal specification. OpenCode uses `AGENTS.md` for agent instructions.
+
+**What validate.sh checks:** Detects presence of `AGENTS.md`. Runs markdownlint on the file (unless `markdown` is skipped). No structural validation beyond markdown lint.
+
+**What validate.sh doesn't check:** File content structure or any OpenCode-specific conventions. If OpenCode publishes a spec in the future, add structural checks here.
+
+## Tier 3: Deployment Verification
+
+Deployment checks are **opt-in** via `--check-deploy`. They verify installed
+state on the host, not repo structure. Off by default — CI runners typically
+lack agent CLIs in the right state.
+
+### Claude Code
+
+Requires `claude` binary on PATH. Parses `claude plugin list --json` and
+`claude plugin marketplace list --json`. Checks:
+- Each marketplace.json name appears in registered marketplaces
+- Each plugin (root + marketplace sub-plugins) is installed and enabled
+- Plugin matching uses `.id` prefix (`name@marketplace` format)
+
+### Gemini CLI
+
+Requires `gemini` binary on PATH. Parses `gemini extensions list -o json`.
+Checks:
+- Extension name from gemini-extension.json appears in installed list
+- `.isActive` is true (not just installed)
+
+### Shared skills hub (~/.agents/skills/)
+
+No CLI needed — checks directory presence. Checks:
+- Each SKILL.md name from the repo has a matching directory under
+  `~/.agents/skills/` (or `$AGENTS_SKILLS_DIR` if set)
+
+### What deployment checks don't do
+
+- No machine-type awareness (work/personal) — consumer-repo concern
+- No content validation (do skills actually work) — domain-specific
+- No installation commands — checks state, doesn't modify it
+
 ## Known Drift
 
 No known drift. All upstream spec requirements are covered.
@@ -129,6 +178,8 @@ No known drift. All upstream spec requirements are covered.
 - **marketplace.json top-level validation** (2026-02-26): Added `name`, `owner.name`, `plugins` array, and relative `source` path resolution checks.
 - **Gemini name format validation** (2026-02-26): Checks `name` is lowercase alphanumeric with dashes.
 - **Pi keyword check** (2026-02-26): Warns if `keywords` does not include `"pi-package"`.
+- **Gemini extension field allowlist** (2026-03-04): Rejects unknown fields in `gemini-extension.json` against `ExtensionConfig` interface.
+- **Codex/OpenCode markdown lint** (2026-03-04): Detected `AGENTS.md`/`codex.md` files are now markdownlinted.
 
 ## Updating Specs
 
@@ -140,3 +191,51 @@ Vendored reference documents are in `references/`. To update:
 4. Update validate.sh if the spec changed
 5. Update "Last verified" dates
 6. Add/remove items from "Known Drift"
+
+## Adding a New Platform
+
+When adding validation support for a new platform, complete every item:
+
+### 1. Vendor the spec
+
+- [ ] Identify the authoritative source(s): CLI validator > source code > docs
+- [ ] Download the spec to `references/<platform>-<docname>.<ext>`
+- [ ] Record the source URL, trust tier, and retrieval date
+
+### 2. Add SKILL.md section
+
+- [ ] Add a "### Platform Name" section under "Platform Specs" above
+- [ ] Include: source URL, vendored path, last-verified date
+- [ ] Document what validate.sh checks vs. what the spec requires
+- [ ] Note any field allowlists, name constraints, or behavioral quirks
+
+### 3. Add validation logic
+
+- [ ] Add platform detection in validate.sh (file-presence based)
+- [ ] Add a `--skip <platform>` value and document it in `usage()`
+- [ ] Add `# Ref:` comments citing vendored reference file and line ranges
+- [ ] Handle malformed input gracefully (error message, not crash)
+
+### 4. Create test fixtures
+
+- [ ] Create `tests/fixtures/<platform>-valid/` with a minimal passing case
+- [ ] Create `tests/fixtures/<platform>-broken/` with at least one failing case
+- [ ] Add `assert_pass` / `assert_fail` / `assert_fail_stderr` entries in `tests/run.sh`
+
+### 5. Wire into freshness check
+
+- [ ] Add fetch-and-diff entry in `.github/workflows/spec-freshness.yml`
+- [ ] For open-source repos: add SHA pin env var (e.g., `NEW_PLATFORM_SHA`)
+- [ ] For closed-source docs: hash-based comparison is automatic
+
+### 6. Wire into CLI regression (if applicable)
+
+- [ ] If the platform has a CLI validator, add a matrix entry in `.github/workflows/cli-regression.yml`
+- [ ] Add pass/fail fixture cases for the CLI validator
+- [ ] If no CLI validator exists, note this in the SKILL.md section
+
+### 7. Update supporting files
+
+- [ ] Add the new `--skip` value to `action.yml` documentation (if visible to consumers)
+- [ ] Update `.github/copilot-instructions.md` review checklist
+- [ ] Update cross-check logic if the platform shares metadata fields with others

@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-VALIDATE_VERSION="1.0.0"
+VALIDATE_VERSION="1.2.0"
 
 # --- Usage ---
 usage() {
@@ -29,6 +29,7 @@ Options:
   --skip CHECKS   Comma-separated checks to skip (repeatable)
   --verbose       Show detailed output
   --quiet         Show only errors and summary
+  --check-deploy  Verify installed state matches repo manifests (Tier 3)
   --version       Show version number
   -h, --help      Show this help message
 
@@ -69,6 +70,7 @@ SKIP_CHECKS=""
 TARGET_DIR=""
 VERBOSE=false
 QUIET=false
+CHECK_DEPLOY=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -86,6 +88,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --quiet)
             QUIET=true
+            shift
+            ;;
+        --check-deploy)
+            CHECK_DEPLOY=true
             shift
             ;;
         --skip)
@@ -344,6 +350,7 @@ if ! should_skip "pi"; then
         info "=== Validating Pi package ==="
 
         # Verify package.json pi paths resolve
+        # Ref: pi-readme.md L361-L370 (pi key in package.json: extensions, skills, prompts, themes)
         if [[ -f "package.json" ]] && jq -e '.pi' "package.json" >/dev/null 2>&1; then
             while IFS= read -r pi_path; do
                 [[ -z "$pi_path" || "$pi_path" == "null" ]] && continue
@@ -355,6 +362,7 @@ if ! should_skip "pi"; then
         fi
 
         # Check for pi-package keyword (discovery convention)
+        # Ref: pi-readme.md L363 (keywords: ["pi-package"])
         if [[ -f "package.json" ]]; then
             has_pi_keyword=$(jq -r '.keywords // [] | map(select(. == "pi-package")) | length' "package.json")
             if [[ "$has_pi_keyword" == "0" ]]; then
@@ -389,6 +397,10 @@ if ! should_skip "codex"; then
         for f in AGENTS.md codex.md; do
             if [[ -f "$f" ]]; then
                 info "Found: $f"
+                # Lint agent instruction files (runs even when global markdown
+                # is skipped — this is a platform-specific check).
+                npx --yes "markdownlint-cli@${MARKDOWNLINT_VERSION}" "$f" \
+                    ${markdownlint_config_args[@]+"${markdownlint_config_args[@]}"} || errors=$((errors + 1))
             fi
         done
     fi
@@ -399,6 +411,10 @@ if ! should_skip "opencode"; then
     if [[ -f "AGENTS.md" ]]; then
         info "=== Detecting OpenCode agent files ==="
         info "Found: AGENTS.md"
+        # Lint agent instruction files (runs even when global markdown
+        # is skipped — this is a platform-specific check).
+        npx --yes "markdownlint-cli@${MARKDOWNLINT_VERSION}" "AGENTS.md" \
+            ${markdownlint_config_args[@]+"${markdownlint_config_args[@]}"} || errors=$((errors + 1))
     fi
 fi
 
@@ -420,9 +436,15 @@ if ! should_skip "crosscheck"; then
     pkg_json="package.json"
 
     # Field allowlist for plugin.json (used by root and sub-plugin checks)
+    # Ref: claude-plugins-reference.md L296-L340 (required + metadata + component path fields)
     # Metadata fields: name, description, version, author, keywords, license, repository, homepage
     # Component path fields: commands, agents, skills, hooks, mcpServers, outputStyles, lspServers
     allowed_fields='["name","description","version","author","keywords","license","repository","homepage","commands","agents","skills","hooks","mcpServers","outputStyles","lspServers"]'
+
+    # Field allowlist for gemini-extension.json (used by root and sub-plugin checks)
+    # Ref: gemini-extension-config.ts L24-L44 (ExtensionConfig interface fields)
+    # Ref: gemini-extension-reference.md L139 (description field, not in interface)
+    gemini_allowed_fields='["name","version","description","mcpServers","contextFileName","excludeTools","settings","themes","plan"]'
 
     if [[ -f "$plugin_json" ]]; then
         if ! jq empty "$plugin_json" 2>/dev/null; then
@@ -434,6 +456,7 @@ if ! should_skip "crosscheck"; then
             pj_description=$(jq -r '.description // empty' "$plugin_json")
 
             # Field allowlist (structural check, no CLI needed)
+            # Ref: claude-plugins-reference.md L296-L340 (full allowlist)
             bad_fields=$(jq -r --argjson allowed "$allowed_fields" \
                 '[keys[] | select(. as $k | $allowed | index($k) | not)] | .[]' \
                 "$plugin_json")
@@ -454,8 +477,19 @@ if ! should_skip "crosscheck"; then
             ge_description=$(jq -r '.description // empty' "$gemini_json")
 
             # Gemini extension name format: lowercase alphanumeric with dashes
+            # Ref: gemini-extension-reference.md L132-L138 (name constraints)
+            # Ref: gemini-extension-config.ts L24-L25 (name: string, required)
             if [[ -n "$ge_name" ]] && ! echo "$ge_name" | grep -qE '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
                 echo "Error: gemini-extension.json name '$ge_name' must be lowercase alphanumeric with dashes" >&2
+                errors=$((errors + 1))
+            fi
+
+            # Field allowlist (structural check)
+            ge_bad_fields=$(jq -r --argjson allowed "$gemini_allowed_fields" \
+                '[keys[] | select(. as $k | $allowed | index($k) | not)] | .[]' \
+                "$gemini_json")
+            if [[ -n "$ge_bad_fields" ]]; then
+                echo "Error: gemini-extension.json has unrecognized fields: $ge_bad_fields" >&2
                 errors=$((errors + 1))
             fi
         fi
@@ -468,6 +502,7 @@ if ! should_skip "crosscheck"; then
     fi
 
     # Compare plugin.json ↔ gemini-extension.json
+    # Ref: claude-plugins-reference.md L274-L276, gemini-extension-reference.md L114-L116
     if [[ -n "$pj_name" && -n "$ge_name" && "$pj_name" != "$ge_name" ]]; then
         echo "Error: Name mismatch: plugin.json='$pj_name' gemini-extension.json='$ge_name'" >&2
         errors=$((errors + 1))
@@ -510,6 +545,8 @@ if ! should_skip "crosscheck"; then
     fi
 
     # Gemini contextFileName file resolution (handles string or string[])
+    # Ref: gemini-extension-reference.md L153-L157 (contextFileName semantics)
+    # Ref: gemini-extension-config.ts L28 (contextFileName?: string | string[])
     if [[ -f "$gemini_json" ]]; then
         info "=== Checking Gemini extension context files ==="
         ctx_type=$(jq -r '.contextFileName | type' "$gemini_json")
@@ -541,26 +578,31 @@ if ! should_skip "crosscheck"; then
     fi
 
     # Marketplace top-level validation
+    # Ref: claude-plugin-marketplaces.md L152-L157 (required fields: name, owner, plugins)
     if [[ -f "$marketplace" ]]; then
         info "=== Validating marketplace.json structure ==="
         # Required: name
+        # Ref: claude-plugin-marketplaces.md L155 (name field)
         mp_top_name=$(jq -r '.name // empty' "$marketplace")
         if [[ -z "$mp_top_name" ]]; then
             echo "Error: marketplace.json missing required name field" >&2
             errors=$((errors + 1))
         fi
         # Required: owner.name
+        # Ref: claude-plugin-marketplaces.md L156,L167 (owner.name required)
         mp_owner_name=$(jq -r '.owner.name // empty' "$marketplace")
         if [[ -z "$mp_owner_name" ]]; then
             echo "Error: marketplace.json missing required owner.name field" >&2
             errors=$((errors + 1))
         fi
         # Required: plugins array
+        # Ref: claude-plugin-marketplaces.md L157 (plugins array required)
         if ! jq -e '.plugins | type == "array"' "$marketplace" >/dev/null 2>&1; then
             echo "Error: marketplace.json missing required plugins array" >&2
             errors=$((errors + 1))
         fi
         # Validate source paths resolve (relative paths only)
+        # Ref: claude-plugin-marketplaces.md L109-L111 (plugins can't reference files outside dir)
         mp_src_count=$(jq -e -r '.plugins | length' "$marketplace" 2>/dev/null) || mp_src_count=0
         for ((i = 0; i < mp_src_count; i++)); do
             mp_src=$(jq -r ".plugins[$i].source" "$marketplace")
@@ -648,6 +690,15 @@ if ! should_skip "crosscheck"; then
                         echo "Error: Description mismatch for $mp_name: marketplace='$mp_description' gemini-extension.json='$sub_ge_description'" >&2
                         errors=$((errors + 1))
                     fi
+
+                    # Per-plugin Gemini field allowlist
+                    sub_ge_bad=$(jq -r --argjson allowed "$gemini_allowed_fields" \
+                        '[keys[] | select(. as $k | $allowed | index($k) | not)] | .[]' \
+                        "$sub_ge")
+                    if [[ -n "$sub_ge_bad" ]]; then
+                        echo "Error: $mp_name gemini-extension.json has unrecognized fields: $sub_ge_bad" >&2
+                        errors=$((errors + 1))
+                    fi
                 fi
             fi
         done
@@ -709,6 +760,7 @@ if ! should_skip "skills"; then
     done < <(find -P . -path "*/plugins/*/skills" -type d -print0 2>/dev/null)
 
     # Allowed frontmatter fields (Agent Skills spec)
+    # Ref: agentskills-specification.mdx L49-L54 (frontmatter field table)
     allowed_fm_fields="name description license allowed-tools metadata compatibility"
     # Known agent-specific extensions (warning, not error)
     known_extensions="user-invocable argument-hint"
@@ -723,6 +775,7 @@ if ! should_skip "skills"; then
             frontmatter=$(awk '/^---$/{if(++c==2)exit; next} c==1{print}' "$skill_file")
 
             # --- name: required ---
+            # Ref: agentskills-specification.mdx L49 (name: required)
             fm_name=$(echo "$frontmatter" | awk '/^name:/{sub(/^name:[[:space:]]*/, ""); print; exit}')
             if [[ -z "$fm_name" ]]; then
                 echo "Error: No frontmatter 'name' in $skill_file" >&2
@@ -731,30 +784,35 @@ if ! should_skip "skills"; then
             fi
 
             # Name format: max 64 chars
+            # Ref: agentskills-specification.mdx L49,L59 (max 64 characters)
             if [[ ${#fm_name} -gt 64 ]]; then
                 echo "Error: Skill name '$fm_name' exceeds 64-char limit (${#fm_name} chars) in $skill_file" >&2
                 errors=$((errors + 1))
             fi
 
             # Name format: lowercase alnum + hyphens only
+            # Ref: agentskills-specification.mdx L49,L60 (lowercase alphanumeric + hyphens)
             if ! echo "$fm_name" | grep -qE '^[a-z0-9-]+$'; then
                 echo "Error: Skill name '$fm_name' contains invalid characters (must be lowercase alphanumeric + hyphens) in $skill_file" >&2
                 errors=$((errors + 1))
             fi
 
             # Name format: no leading/trailing hyphens
+            # Ref: agentskills-specification.mdx L61 (must not start or end with -)
             if [[ "$fm_name" == -* || "$fm_name" == *- ]]; then
                 echo "Error: Skill name '$fm_name' must not start or end with a hyphen in $skill_file" >&2
                 errors=$((errors + 1))
             fi
 
             # Name format: no consecutive hyphens
+            # Ref: agentskills-specification.mdx L62 (must not contain consecutive hyphens)
             if [[ "$fm_name" == *--* ]]; then
                 echo "Error: Skill name '$fm_name' must not contain consecutive hyphens in $skill_file" >&2
                 errors=$((errors + 1))
             fi
 
             # Name must match folder (configurable via skip)
+            # Ref: agentskills-specification.mdx L63 (must match parent directory name)
             if ! should_skip "skill-name-match" && [[ "$fm_name" != "$folder_name" ]]; then
                 # Promoted SKILL.md (sitting in a category dir) gets warning, not error
                 grandparent=$(basename "$(dirname "$skill_dir")")
@@ -767,6 +825,7 @@ if ! should_skip "skills"; then
             fi
 
             # --- description: required, non-empty, max 1024 chars ---
+            # Ref: agentskills-specification.mdx L50 (max 1024 chars, non-empty)
             fm_desc=$(echo "$frontmatter" | awk '/^description:/{sub(/^description:[[:space:]]*/, ""); print; exit}')
             if [[ -z "$fm_desc" ]]; then
                 echo "Error: No frontmatter 'description' (or empty value) in $skill_file" >&2
@@ -777,6 +836,7 @@ if ! should_skip "skills"; then
             fi
 
             # --- compatibility: max 500 chars if present ---
+            # Ref: agentskills-specification.mdx L52 (max 500 characters)
             fm_compat=$(echo "$frontmatter" | awk '/^compatibility:/{sub(/^compatibility:[[:space:]]*/, ""); print; exit}')
             if [[ -n "$fm_compat" && ${#fm_compat} -gt 500 ]]; then
                 echo "Error: Compatibility exceeds 500-char limit (${#fm_compat} chars) in $skill_file" >&2
@@ -784,6 +844,7 @@ if ! should_skip "skills"; then
             fi
 
             # --- Frontmatter field allowlist ---
+            # Ref: agentskills-specification.mdx L49-L54 (only specified fields permitted)
             while IFS= read -r field_name; do
                 [[ -z "$field_name" ]] && continue
                 # Check against spec allowlist
@@ -810,6 +871,172 @@ if ! should_skip "skills"; then
         fi
     fi
 fi
+
+# --- Tier 3: Deployment verification ---
+
+if $CHECK_DEPLOY; then
+
+    # Claude Code deployment check
+    if command -v claude >/dev/null 2>&1; then
+        info "=== Checking deployment (Claude Code) ==="
+
+        # Check marketplace registration
+        if [[ -f ".claude-plugin/marketplace.json" ]]; then
+            mp_name_expected=$(jq -r '.name // empty' \
+                ".claude-plugin/marketplace.json")
+            if [[ -n "$mp_name_expected" ]]; then
+                if mp_list=$(claude plugin marketplace list --json 2>&1); then
+                    if echo "$mp_list" | jq -e \
+                        --arg n "$mp_name_expected" \
+                        '[.[] | select(.name == $n)] | length > 0' \
+                        >/dev/null 2>&1; then
+                        info "  ✓ marketplace ${mp_name_expected}: registered"
+                    else
+                        echo "Error: marketplace ${mp_name_expected}: not registered" >&2
+                        errors=$((errors + 1))
+                    fi
+                else
+                    echo "Error: claude plugin marketplace list failed" >&2
+                    detail "  $mp_list"
+                    errors=$((errors + 1))
+                fi
+            fi
+        fi
+
+        # Check plugin installation and enabled state
+        plugin_list=""
+        if [[ -f ".claude-plugin/plugin.json" ]] || [[ -f ".claude-plugin/marketplace.json" ]]; then
+            if ! plugin_list=$(claude plugin list --json 2>&1); then
+                echo "Error: claude plugin list failed" >&2
+                detail "  $plugin_list"
+                errors=$((errors + 1))
+                plugin_list=""
+            fi
+        fi
+
+        # Root plugin
+        if [[ -n "$plugin_list" && -f ".claude-plugin/plugin.json" ]]; then
+            root_pj_name=$(jq -r '.name // empty' \
+                ".claude-plugin/plugin.json")
+            if [[ -n "$root_pj_name" ]]; then
+                plugin_match=$(echo "$plugin_list" | jq -r \
+                    --arg n "$root_pj_name" \
+                    '[.[] | select(.id | startswith($n + "@"))] | .[0]')
+                if [[ "$plugin_match" != "null" && -n "$plugin_match" ]]; then
+                    is_enabled=$(echo "$plugin_match" | jq -r '.enabled')
+                    if [[ "$is_enabled" == "true" ]]; then
+                        info "  ✓ plugin ${root_pj_name}: installed and enabled"
+                    else
+                        echo "Error: plugin ${root_pj_name}: installed but not enabled" >&2
+                        errors=$((errors + 1))
+                    fi
+                else
+                    echo "Error: plugin ${root_pj_name}: not installed" >&2
+                    errors=$((errors + 1))
+                fi
+            fi
+        fi
+
+        # Marketplace sub-plugins
+        if [[ -n "$plugin_list" && -f ".claude-plugin/marketplace.json" ]]; then
+            if ! mp_deploy_count=$(jq -e -r '.plugins | length' \
+                ".claude-plugin/marketplace.json" 2>/dev/null); then
+                echo "Error: failed to parse .claude-plugin/marketplace.json (.plugins)" >&2
+                errors=$((errors + 1))
+                mp_deploy_count=0
+            fi
+            for ((i = 0; i < mp_deploy_count; i++)); do
+                sub_name=$(jq -r ".plugins[$i].name" \
+                    ".claude-plugin/marketplace.json")
+                # Skip if already checked as root plugin
+                [[ "$sub_name" == "${root_pj_name:-}" ]] && continue
+                plugin_match=$(echo "$plugin_list" | jq -r \
+                    --arg n "$sub_name" \
+                    '[.[] | select(.id | startswith($n + "@"))] | .[0]')
+                if [[ "$plugin_match" != "null" && -n "$plugin_match" ]]; then
+                    is_enabled=$(echo "$plugin_match" | jq -r '.enabled')
+                    if [[ "$is_enabled" == "true" ]]; then
+                        info "  ✓ plugin ${sub_name}: installed and enabled"
+                    else
+                        echo "Error: plugin ${sub_name}: installed but not enabled" >&2
+                        errors=$((errors + 1))
+                    fi
+                else
+                    echo "Error: plugin ${sub_name}: not installed" >&2
+                    errors=$((errors + 1))
+                fi
+            done
+        fi
+    else
+        detail "Claude CLI not found, skipping deployment check"
+    fi
+
+    # Gemini CLI deployment check
+    if command -v gemini >/dev/null 2>&1; then
+        if [[ -f "gemini-extension.json" ]]; then
+            info "=== Checking deployment (Gemini CLI) ==="
+            ge_deploy_name=$(jq -r '.name // empty' "gemini-extension.json")
+            if [[ -n "$ge_deploy_name" ]]; then
+                if ext_list=$(gemini extensions list -o json 2>&1); then
+                    ext_match=$(echo "$ext_list" | jq -r \
+                        --arg n "$ge_deploy_name" \
+                        '[.[] | select(.name == $n)] | .[0]')
+                    if [[ "$ext_match" != "null" && -n "$ext_match" ]]; then
+                        is_active=$(echo "$ext_match" | jq -r '.isActive')
+                        if [[ "$is_active" == "true" ]]; then
+                            info "  ✓ extension ${ge_deploy_name}: installed and enabled"
+                        else
+                            echo "Error: extension ${ge_deploy_name}: installed but disabled" >&2
+                            errors=$((errors + 1))
+                        fi
+                    else
+                        echo "Error: extension ${ge_deploy_name}: not installed" >&2
+                        errors=$((errors + 1))
+                    fi
+                else
+                    echo "Error: gemini extensions list failed" >&2
+                    detail "  $ext_list"
+                    errors=$((errors + 1))
+                fi
+            fi
+        fi
+    else
+        detail "Gemini CLI not found, skipping deployment check"
+    fi
+
+    # Shared skills hub deployment check
+    # Checks ~/.agents/skills/ for expected skill directories.
+    # Override with AGENTS_SKILLS_DIR env var.
+    agents_skills_dir="${AGENTS_SKILLS_DIR:-${HOME}/.agents/skills}"
+
+    # Collect expected skill names from SKILL.md discovery
+    deploy_skill_names=()
+    for sd in skills .agents/skills .claude/skills .opencode/skills; do
+        [[ -d "$sd" ]] || continue
+        while IFS= read -r -d '' skill_file; do
+            fm_name=$(awk '/^---$/{if(++c==2)exit; next} c==1 && /^name:/{sub(/^name:[[:space:]]*/, ""); print; exit}' "$skill_file")
+            [[ -n "$fm_name" ]] && deploy_skill_names+=("$fm_name")
+        done < <(find -P "$sd" -name "SKILL.md" -print0)
+    done
+
+    if [[ ${#deploy_skill_names[@]} -gt 0 ]]; then
+        info "=== Checking deployment (~/.agents/skills/) ==="
+        if [[ ! -d "$agents_skills_dir" ]]; then
+            echo "Error: shared skills hub directory ${agents_skills_dir}/ not found; expected skills: ${deploy_skill_names[*]}" >&2
+            errors=$((errors + 1))
+        else
+            for skill_name in "${deploy_skill_names[@]}"; do
+                if [[ -d "$agents_skills_dir/$skill_name" ]]; then
+                    info "  ✓ skill ${skill_name}: found"
+                else
+                    echo "Error: skill ${skill_name}: not found in ${agents_skills_dir}/" >&2
+                    errors=$((errors + 1))
+                fi
+            done
+        fi
+    fi
+
+fi  # CHECK_DEPLOY
 
 # --- Extra validation hook ---
 if [[ -f "scripts/validate-extra.sh" ]]; then
