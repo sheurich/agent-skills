@@ -1,7 +1,5 @@
 # Copilot Instructions
 
-When performing a code review, apply the guidelines in CONTRIBUTING.md.
-
 When performing a code review, this is a public cross-agent skill repository.
 Every skill must work across coding agents (Claude Code, Codex, Gemini CLI,
 OpenCode, Pi). Cross-agent compatibility is the core review criterion.
