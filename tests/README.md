@@ -65,3 +65,11 @@ ones.
 | Pass | Pass | Skill may be unnecessary |
 | Fail | Fail | Skill needs improvement |
 | Pass | Fail | Bug in skill |
+
+## Content Validation
+
+Structural checks (linting, frontmatter, marketplace consistency) are
+automated by `validate.sh` and CI. Content correctness — whether
+commands exist, paths resolve, and examples produce the stated
+results — is verified during PR review and manual testing. Run the
+skill's test scenario in at least two agents before submitting.

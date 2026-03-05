@@ -16,6 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
-      - uses: sheurich/agent-validate@31f67d979c763ce1a5ff833ae0b3ffecbc6ed1c6  # v1.2.0
+      - uses: sheurich/agent-validate@7470fdda8302b246f0f24dd02b7cdbe2c4a9c5ab  # v1.2.0
         with:
           skip: claude,gemini

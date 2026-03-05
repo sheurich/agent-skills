@@ -13,7 +13,9 @@
       "description": "Agent skills collection",
       "source": "./skills",
       "strict": false,
-      "skills": []
+      "skills": [
+        "./skills/skill-authoring"
+      ]
     }
   ]
 }

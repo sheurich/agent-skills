@@ -3,6 +3,69 @@
 Every skill in this repo must work across coding agents. Cross-agent
 compatibility is the core requirement.
 
+## Walkthrough
+
+Adding a simple skill end to end, using `my-skill` as the example.
+
+### 1. Create the skill
+
+```bash
+mkdir -p skills/my-skill
+```
+
+Write `skills/my-skill/SKILL.md` with required frontmatter:
+
+```yaml
+---
+name: my-skill
+description: >-
+  What this skill does in one sentence.
+  Use when <triggering condition>.
+---
+```
+
+The `name` must match the folder name. The `description` must state
+WHAT the skill does and WHEN to activate it.
+
+Add body content below the frontmatter. Keep under 500 lines. Put
+heavy reference material in `references/`.
+
+### 2. Register in marketplace.json
+
+Add the skill path to `.claude-plugin/marketplace.json`:
+
+```json
+"skills": [
+  "./skills/my-skill"
+]
+```
+
+### 3. Update the skills table
+
+Add a row for the skill in `README.md`:
+
+```markdown
+| [my-skill](skills/my-skill/SKILL.md) | What this skill does and when to use it. |
+```
+
+### 4. Create a test scenario
+
+Write `tests/scenarios/my-skill/scenario.md` following the
+format in [tests/README.md](tests/README.md). Define context, task,
+and pass/fail criteria.
+
+### 5. Validate
+
+```bash
+./validate.sh
+```
+
+All checks must pass: linting, marketplace consistency, test coverage.
+
+### 6. Submit
+
+Fork, branch, commit, open a pull request. Copilot and a human review.
+
 ## Choose a Layout
 
 ### Simple skill

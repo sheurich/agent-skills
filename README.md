@@ -21,8 +21,7 @@ npx skills add sheurich/agent-skills -s <skill-name> -g
 
 | Skill | Description |
 | --- | --- |
-
-<!-- Update this table as skills are added. -->
+| [skill-authoring](skills/skill-authoring/SKILL.md) | Write and refine agent skills using test-driven development. Use when creating new skills, editing existing skills, or reviewing skill quality. |
 
 ## Contributing
 

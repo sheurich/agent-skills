@@ -95,6 +95,60 @@ elif [[ -f "$marketplace" ]]; then
 
 fi
 
+# --- CI workflow and vendored agent-validate must stay in sync ---
+
+workflow=".github/workflows/validate.yml"
+braids=".braids.json"
+
+if [[ -f "$workflow" ]] && [[ -f "$braids" ]]; then
+  echo "Checking agent-validate version sync"
+
+  # Extract SHA from workflow: sheurich/agent-validate@<sha>
+  # Always pin the commit SHA (not annotated tag object) in the workflow
+  # so this comparison works without needing a local git repo.
+  ci_sha=$(grep -o 'sheurich/agent-validate@[0-9a-f]\{40\}' "$workflow" 2>/dev/null | head -1 | cut -d@ -f2)
+
+  # Extract revision from .braids.json (always a commit SHA)
+  if command -v jq >/dev/null 2>&1; then
+    vendor_sha=$(jq -r '.mirrors["vendor/agent-validate"].revision // empty' "$braids" 2>/dev/null)
+  else
+    vendor_sha=$(grep -A1 '"revision"' "$braids" 2>/dev/null | grep -o '[0-9a-f]\{40\}' | head -1)
+  fi
+
+  if [[ -n "$ci_sha" ]] && [[ -n "$vendor_sha" ]] && [[ "$ci_sha" != "$vendor_sha" ]]; then
+    echo "Error: agent-validate version mismatch" >&2
+    echo "  CI workflow pins: $ci_sha" >&2
+    echo "  Vendored copy is: $vendor_sha" >&2
+    echo "  Update both together: bump the workflow SHA and run 'braid update'" >&2
+    errors=$((errors + 1))
+  fi
+fi
+
+# --- Review criteria and contribution guidelines must stay in sync ---
+#
+# .github/copilot-instructions.md and CONTRIBUTING.md cover overlapping
+# rules for different audiences (automated reviewer vs contributors).
+# When one changes, the other likely needs updating too. This check
+# only runs in CI where the merge base is available.
+
+if [[ -n "${GITHUB_BASE_REF:-}" ]] && command -v git >/dev/null 2>&1; then
+  echo "Checking review criteria / contribution guide sync"
+  changed=$(git diff --name-only "origin/${GITHUB_BASE_REF}"...HEAD 2>/dev/null || true)
+  copilot_changed=false
+  contributing_changed=false
+  echo "$changed" | grep -q '^\.github/copilot-instructions\.md$' && copilot_changed=true
+  echo "$changed" | grep -q '^CONTRIBUTING\.md$' && contributing_changed=true
+
+  if [[ "$copilot_changed" == true ]] && [[ "$contributing_changed" == false ]]; then
+    echo "Warning: .github/copilot-instructions.md changed but CONTRIBUTING.md did not" >&2
+    echo "  These files share overlapping rules. Verify CONTRIBUTING.md is still accurate." >&2
+  fi
+  if [[ "$contributing_changed" == true ]] && [[ "$copilot_changed" == false ]]; then
+    echo "Warning: CONTRIBUTING.md changed but .github/copilot-instructions.md did not" >&2
+    echo "  These files share overlapping rules. Verify copilot-instructions.md is still accurate." >&2
+  fi
+fi
+
 if [[ $errors -gt 0 ]]; then
   echo "Error: $errors repo-specific check(s) failed" >&2
   exit 1
