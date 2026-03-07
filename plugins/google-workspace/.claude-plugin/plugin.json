@@ -1,0 +1,5 @@
+{
+  "name": "google-workspace",
+  "version": "1.0.0",
+  "description": "Google Workspace MCP server via gws CLI"
+}

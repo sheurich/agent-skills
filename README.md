@@ -23,6 +23,12 @@ npx skills add sheurich/agent-skills -s <skill-name> -g
 | --- | --- |
 | [skill-authoring](skills/skill-authoring/SKILL.md) | Write and refine agent skills using test-driven development. Use when creating new skills, editing existing skills, or reviewing skill quality. |
 
+## Plugins
+
+| Plugin | Description |
+| --- | --- |
+| [google-workspace](plugins/google-workspace/) | Claude Code MCP bridge for [`gws`](https://github.com/googleworkspace/cli). Gemini CLI and Pi users should install upstream directly. |
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add skills, write tests,

@@ -16,6 +16,11 @@
       "skills": [
         "./skills/skill-authoring"
       ]
+    },
+    {
+      "name": "google-workspace",
+      "description": "Google Workspace MCP server via gws CLI",
+      "source": "./plugins/google-workspace"
     }
   ]
 }
