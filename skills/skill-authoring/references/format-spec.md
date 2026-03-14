@@ -86,6 +86,23 @@ plugins/plugin-name/
 | `assets/` | Templates, fonts, images | Output only |
 | `README.md` | Human-facing documentation | Never |
 
+## Path References
+
+Paths in skill files must be relative to the skill file's location.
+All tested agents (Claude Code, Gemini CLI, Pi) resolve `../` paths
+relative to the file containing the link. Bare paths without `../`
+may resolve from CWD in some agents, but this is not portable.
+
+```markdown
+# In skills/my-skill/SKILL.md
+
+# ✓ Relative to skill file — works in all agents
+See [deployment.md](../../engineering/deployment.md)
+
+# ✗ No ../ prefix — may resolve from CWD, breaks in Claude Code
+See [deployment.md](engineering/deployment.md)
+```
+
 ## External Tool Patterns
 
 No formal dependency declaration exists. Document dependencies in
