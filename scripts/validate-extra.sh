@@ -95,33 +95,23 @@ elif [[ -f "$marketplace" ]]; then
 
 fi
 
-# --- CI workflow and vendored agent-validate must stay in sync ---
+# --- Vendored agent-validate VERSION file must exist ---
 
-workflow=".github/workflows/validate.yml"
-braids=".braids.json"
+version_file="vendor/agent-validate/VERSION"
 
-if [[ -f "$workflow" ]] && [[ -f "$braids" ]]; then
-  echo "Checking agent-validate version sync"
-
-  # Extract SHA from workflow: sheurich/agent-validate@<sha>
-  # Always pin the commit SHA (not annotated tag object) in the workflow
-  # so this comparison works without needing a local git repo.
-  ci_sha=$(grep -o 'sheurich/agent-validate@[0-9a-f]\{40\}' "$workflow" 2>/dev/null | head -1 | cut -d@ -f2)
-
-  # Extract revision from .braids.json (always a commit SHA)
-  if command -v jq >/dev/null 2>&1; then
-    vendor_sha=$(jq -r '.mirrors["vendor/agent-validate"].revision // empty' "$braids" 2>/dev/null)
-  else
-    vendor_sha=$(grep -A1 '"revision"' "$braids" 2>/dev/null | grep -o '[0-9a-f]\{40\}' | head -1)
-  fi
-
-  if [[ -n "$ci_sha" ]] && [[ -n "$vendor_sha" ]] && [[ "$ci_sha" != "$vendor_sha" ]]; then
-    echo "Error: agent-validate version mismatch" >&2
-    echo "  CI workflow pins: $ci_sha" >&2
-    echo "  Vendored copy is: $vendor_sha" >&2
-    echo "  Update both together: bump the workflow SHA and run 'braid update'" >&2
+if [[ -f "$version_file" ]]; then
+  echo "Checking agent-validate VERSION file"
+  if ! grep -q '^version:' "$version_file"; then
+    echo "Error: vendor/agent-validate/VERSION missing 'version:' field" >&2
     errors=$((errors + 1))
   fi
+  if ! grep -q '^sha:' "$version_file"; then
+    echo "Error: vendor/agent-validate/VERSION missing 'sha:' field" >&2
+    errors=$((errors + 1))
+  fi
+else
+  echo "Error: vendor/agent-validate/VERSION not found" >&2
+  errors=$((errors + 1))
 fi
 
 # --- Review criteria and contribution guidelines must stay in sync ---

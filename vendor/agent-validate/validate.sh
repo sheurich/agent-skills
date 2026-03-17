@@ -10,13 +10,14 @@
 #   YAMLLINT_VERSION       yamllint version (default: 1.37.0)
 #   MARKDOWNLINT_VERSION   markdownlint-cli version (default: 0.47.0)
 #   RUFF_VERSION           ruff version (default: 0.14.14)
-#   CLAUDE_CODE_VERSION    @anthropic-ai/claude-code version (default: 2.1.22)
-#   GEMINI_CLI_VERSION     @google/gemini-cli version (default: 0.26.0)
+#   CLAUDE_CODE_VERSION    @anthropic-ai/claude-code version (default: 2.1.76)
+#   GEMINI_CLI_VERSION     @google/gemini-cli version (default: 0.33.1)
 #   TYPESCRIPT_VERSION     typescript version (default: 5.8.3)
+#   JS_YAML_VERSION        js-yaml version (default: 4.1.0)
 
 set -euo pipefail
 
-VALIDATE_VERSION="1.2.0"
+VALIDATE_VERSION="1.6.0"
 
 # --- Usage ---
 usage() {
@@ -58,9 +59,10 @@ JSONLINT_VERSION="${JSONLINT_VERSION:-1.7.6}"
 YAMLLINT_VERSION="${YAMLLINT_VERSION:-1.37.0}"
 MARKDOWNLINT_VERSION="${MARKDOWNLINT_VERSION:-0.47.0}"
 RUFF_VERSION="${RUFF_VERSION:-0.14.14}"
-CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.22}"
-GEMINI_CLI_VERSION="${GEMINI_CLI_VERSION:-0.26.0}"
+CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.76}"
+GEMINI_CLI_VERSION="${GEMINI_CLI_VERSION:-0.33.1}"
 TYPESCRIPT_VERSION="${TYPESCRIPT_VERSION:-5.8.3}"
+JS_YAML_VERSION="${JS_YAML_VERSION:-4.1.0}"
 
 # --- Script location (for bundled defaults) ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -215,7 +217,7 @@ if ! should_skip "json"; then
     json_files=()
     while IFS= read -r -d '' f; do
         json_files+=("$f")
-    done < <(find -P . -name "*.json" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./.venv/*" -not -path "*/site-packages/*" -not -path "./vendor/*" -print0)
+    done < <(find -P . -name "*.json" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./.venv/*" -not -path "*/site-packages/*" -not -path "*/vendor/*" -print0)
     if [[ ${#json_files[@]} -gt 0 ]]; then
         printf '%s\0' "${json_files[@]}" | xargs -0 -n1 npx --yes "jsonlint-mod@${JSONLINT_VERSION}" -q || errors=$((errors + 1))
     else
@@ -228,7 +230,7 @@ if ! should_skip "yaml"; then
     yaml_files=()
     while IFS= read -r -d '' f; do
         yaml_files+=("$f")
-    done < <(find -P . \( -name "*.yml" -o -name "*.yaml" \) -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./.venv/*" -not -path "*/site-packages/*" -not -path "./vendor/*" -print0)
+    done < <(find -P . \( -name "*.yml" -o -name "*.yaml" \) -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./.venv/*" -not -path "*/site-packages/*" -not -path "*/vendor/*" -print0)
     if [[ ${#yaml_files[@]} -gt 0 ]]; then
         # Use system yamllint if available (e.g. pip install in CI), otherwise uvx
         yamllint_cmd=(uvx "yamllint@${YAMLLINT_VERSION}")
@@ -257,7 +259,7 @@ if ! should_skip "shell"; then
         shell_files=()
         while IFS= read -r -d '' f; do
             shell_files+=("$f")
-        done < <(find -P . -name "*.sh" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./.venv/*" -not -path "./vendor/*" -print0)
+        done < <(find -P . -name "*.sh" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./.venv/*" -not -path "*/vendor/*" -print0)
         if [[ ${#shell_files[@]} -gt 0 ]]; then
             printf '%s\0' "${shell_files[@]}" | xargs -0 shellcheck || errors=$((errors + 1))
         else
@@ -271,7 +273,7 @@ if ! should_skip "python"; then
     py_files=()
     while IFS= read -r -d '' f; do
         py_files+=("$f")
-    done < <(find -P . -name "*.py" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./.venv/*" -not -path "*/site-packages/*" -not -path "./vendor/*" -print0)
+    done < <(find -P . -name "*.py" -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./.venv/*" -not -path "*/site-packages/*" -not -path "*/vendor/*" -print0)
     if [[ ${#py_files[@]} -gt 0 ]]; then
         # Use system ruff if available, otherwise uvx
         ruff_cmd=(uvx "ruff@${RUFF_VERSION}")
@@ -286,6 +288,12 @@ if ! should_skip "python"; then
 fi
 
 # --- Tier 2: Platform-specific ---
+
+# Gemini CLI ≥0.31.0 gates on auth config before dispatching any subcommand,
+# even offline ones like `extensions validate`.  A dummy GEMINI_API_KEY
+# satisfies the gate without calling the API.
+: "${GEMINI_API_KEY:=not-a-real-key}"
+export GEMINI_API_KEY
 
 # Claude Code
 if ! should_skip "claude"; then
@@ -350,15 +358,25 @@ if ! should_skip "pi"; then
         info "=== Validating Pi package ==="
 
         # Verify package.json pi paths resolve
-        # Ref: pi-readme.md L361-L370 (pi key in package.json: extensions, skills, prompts, themes)
+        # Ref: pi-readme.md L351-L368 (pi key in package.json: extensions, skills, prompts, themes)
         if [[ -f "package.json" ]] && jq -e '.pi' "package.json" >/dev/null 2>&1; then
-            while IFS= read -r pi_path; do
+            while IFS=$'\t' read -r pi_key pi_path; do
                 [[ -z "$pi_path" || "$pi_path" == "null" ]] && continue
+                # Skip URL values only for known gallery fields (video, image)
+                if [[ "$pi_key" == "video" || "$pi_key" == "image" ]] && [[ "$pi_path" =~ ^https?:// ]]; then
+                    continue
+                fi
+                # Skip negation/exclusion globs (Pi uses ! prefix to exclude paths)
+                # Not documented in pi-readme.md; observed Pi behavior consistent
+                # with standard glob negation (e.g., "!prompts/README.md").
+                if [[ "$pi_path" == !* ]]; then
+                    continue
+                fi
                 if [[ ! -e "$pi_path" ]]; then
                     echo "Error: package.json pi path does not resolve: $pi_path" >&2
                     errors=$((errors + 1))
                 fi
-            done < <(jq -r '.pi | to_entries[] | .value | if type == "array" then .[] else . end | strings' "package.json" 2>/dev/null || true)
+            done < <(jq -r '.pi | to_entries[] | . as $e | ($e.value | if type == "array" then .[] else . end | strings) as $v | "\($e.key)\t\($v)"' "package.json" 2>/dev/null || true)
         fi
 
         # Check for pi-package keyword (discovery convention)
@@ -374,7 +392,7 @@ if ! should_skip "pi"; then
         ts_files=()
         while IFS= read -r -d '' f; do
             ts_files+=("$f")
-        done < <(find -P . -path "./extensions/*.ts" -not -path "./node_modules/*" -not -path "./vendor/*" -print0 2>/dev/null)
+        done < <(find -P . -path "./extensions/*.ts" -not -path "./node_modules/*" -not -path "*/vendor/*" -print0 2>/dev/null)
         if [[ ${#ts_files[@]} -gt 0 ]]; then
             if command -v npx >/dev/null 2>&1; then
                 info "Checking TypeScript syntax in extensions/"
@@ -442,9 +460,11 @@ if ! should_skip "crosscheck"; then
     allowed_fields='["name","description","version","author","keywords","license","repository","homepage","commands","agents","skills","hooks","mcpServers","outputStyles","lspServers"]'
 
     # Field allowlist for gemini-extension.json (used by root and sub-plugin checks)
-    # Ref: gemini-extension-config.ts L24-L44 (ExtensionConfig interface fields)
-    # Ref: gemini-extension-reference.md L139 (description field, not in interface)
-    gemini_allowed_fields='["name","version","description","mcpServers","contextFileName","excludeTools","settings","themes","plan"]'
+    # Ref: gemini-extension-config.ts L24-L48 (ExtensionConfig interface fields)
+    # Ref: gemini-extension-reference.md L140 (description field, not in interface)
+    # Ref: gemini-extension-reference.md L142-L144 (migratedTo field)
+    # NOTE: "description" is in the reference docs but not the TS interface.
+    gemini_allowed_fields='["name","version","description","mcpServers","contextFileName","excludeTools","settings","themes","plan","migratedTo"]'
 
     if [[ -f "$plugin_json" ]]; then
         if ! jq empty "$plugin_json" 2>/dev/null; then
@@ -574,6 +594,65 @@ if ! should_skip "crosscheck"; then
             if [[ ! -f "GEMINI.md" ]]; then
                 info "Note: No contextFileName and no GEMINI.md (Gemini gets no root context)"
             fi
+        fi
+    fi
+
+    # Gemini extension sub-component validation (structural, no CLI needed)
+    # Bundled under crosscheck so tests can skip the gemini CLI while
+    # still exercising structural checks.
+    # Ref: gemini-extension-reference.md L208-L218 (commands), L219-L223 (hooks),
+    #      L231-L236 (agents), L238-L246 (policies)
+    if [[ -f "$gemini_json" ]]; then
+        if [[ -f "hooks/hooks.json" ]]; then
+            detail "Checking hooks/hooks.json syntax"
+            if ! jq empty "hooks/hooks.json" 2>/dev/null; then
+                echo "Error: hooks/hooks.json is not valid JSON" >&2
+                errors=$((errors + 1))
+            fi
+        fi
+
+        if [[ -d "commands" ]]; then
+            ge_toml_files=()
+            while IFS= read -r -d '' f; do
+                ge_toml_files+=("$f")
+            done < <(find -P commands -name "*.toml" -print0 2>/dev/null)
+            if [[ ${#ge_toml_files[@]} -gt 0 ]]; then
+                if command -v taplo >/dev/null 2>&1; then
+                    detail "Checking commands/*.toml syntax"
+                    printf '%s\0' "${ge_toml_files[@]}" | xargs -0 taplo check || errors=$((errors + 1))
+                else
+                    detail "taplo not found, skipping commands/*.toml syntax check"
+                fi
+            fi
+        fi
+
+        if [[ -d "policies" ]]; then
+            ge_policy_files=()
+            while IFS= read -r -d '' f; do
+                ge_policy_files+=("$f")
+            done < <(find -P policies -name "*.toml" -print0 2>/dev/null)
+            if [[ ${#ge_policy_files[@]} -gt 0 ]]; then
+                if command -v taplo >/dev/null 2>&1; then
+                    detail "Checking policies/*.toml syntax"
+                    printf '%s\0' "${ge_policy_files[@]}" | xargs -0 taplo check || errors=$((errors + 1))
+                else
+                    detail "taplo not found, skipping policies/*.toml syntax check"
+                fi
+            fi
+        fi
+
+        if [[ -d "agents" ]]; then
+            while IFS= read -r -d '' agent_md; do
+                # Verify agents/*.md files have YAML frontmatter (opening + closing ---)
+                fm_delimiters=$(grep -c '^---$' "$agent_md" 2>/dev/null || echo 0)
+                if ! head -1 "$agent_md" | grep -q '^---$'; then
+                    echo "Error: $agent_md missing YAML frontmatter (expected --- delimiter)" >&2
+                    errors=$((errors + 1))
+                elif [[ "$fm_delimiters" -lt 2 ]]; then
+                    echo "Error: $agent_md has opening --- but no closing frontmatter delimiter" >&2
+                    errors=$((errors + 1))
+                fi
+            done < <(find -P agents -name "*.md" -print0 2>/dev/null)
         fi
     fi
 
@@ -763,25 +842,78 @@ if ! should_skip "skills"; then
     # Ref: agentskills-specification.mdx L49-L54 (frontmatter field table)
     allowed_fm_fields="name description license allowed-tools metadata compatibility"
     # Known agent-specific extensions (warning, not error)
-    known_extensions="user-invocable argument-hint"
+    # Ref: pi-skills.md L148 (disable-model-invocation frontmatter field)
+    known_extensions="user-invocable argument-hint disable-model-invocation"
 
     if [[ ${#skill_dirs[@]} -gt 0 ]]; then
         info "=== Checking SKILL.md (Agent Skills specification) ==="
+
+        # Verify js-yaml is available before entering the per-file loop.
+        # If unavailable (network/registry), emit one error and skip YAML
+        # parsing entirely — avoids misleading per-file "Malformed YAML"
+        # errors when the real issue is tool availability.
+        js_yaml_available=true
+        if ! echo '{}' | run_npx --yes "js-yaml@${JS_YAML_VERSION}" >/dev/null 2>&1; then
+            echo "Error: js-yaml is not available (npx js-yaml@${JS_YAML_VERSION} failed). Check network/registry." >&2
+            errors=$((errors + 1))
+            js_yaml_available=false
+        fi
+
+        # Collect validated skill names for duplicate detection,
+        # avoiding a second parse pass over every SKILL.md.
+        validated_skill_names=()
+
         while IFS= read -r -d '' skill_file; do
             skill_dir=$(dirname "$skill_file")
             folder_name=$(basename "$skill_dir")
 
-            # Extract all frontmatter lines between --- delimiters
-            frontmatter=$(awk '/^---$/{if(++c==2)exit; next} c==1{print}' "$skill_file")
+            # Extract raw YAML frontmatter between --- delimiters.
+            # awk isolates the text block; js-yaml converts to JSON so jq
+            # can extract fields — handles multi-line scalars (>, |) that
+            # raw line-matching would miss.
+            frontmatter_yaml=$(awk '/^---$/{if(++c==2)exit; next} c==1{print}' "$skill_file")
+
+            if ! $js_yaml_available; then
+                # Tool unavailable — skip YAML parsing (already reported once above)
+                detail "  Skipping YAML parsing for $skill_file (js-yaml unavailable)"
+                continue
+            fi
+
+            # Convert frontmatter to JSON once; all field access uses jq.
+            # Capture stderr to distinguish parse errors from tool failures.
+
+            fm_stderr_file=$(mktemp)
+            fm_json=$(echo "$frontmatter_yaml" | npx --yes "js-yaml@${JS_YAML_VERSION}" 2>"$fm_stderr_file") || true
+
+            fm_stderr=$(cat "$fm_stderr_file")
+            rm -f "$fm_stderr_file"
+            if [[ -z "$fm_json" ]]; then
+                if [[ -n "$fm_stderr" ]]; then
+                    echo "Error: Failed to parse YAML frontmatter in $skill_file" >&2
+                    detail "  $fm_stderr"
+                else
+                    echo "Error: Empty YAML frontmatter in $skill_file" >&2
+                fi
+                errors=$((errors + 1))
+                continue
+            fi
+            if ! echo "$fm_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
+                echo "Error: YAML frontmatter is not a mapping in $skill_file" >&2
+                errors=$((errors + 1))
+                continue
+            fi
 
             # --- name: required ---
             # Ref: agentskills-specification.mdx L49 (name: required)
-            fm_name=$(echo "$frontmatter" | awk '/^name:/{sub(/^name:[[:space:]]*/, ""); print; exit}')
+            fm_name=$(echo "$fm_json" | jq -r '.name // ""')
             if [[ -z "$fm_name" ]]; then
                 echo "Error: No frontmatter 'name' in $skill_file" >&2
                 errors=$((errors + 1))
                 continue
             fi
+
+            # Collect for duplicate detection (avoids re-parsing)
+            validated_skill_names+=("$fm_name")
 
             # Name format: max 64 chars
             # Ref: agentskills-specification.mdx L49,L59 (max 64 characters)
@@ -826,7 +958,7 @@ if ! should_skip "skills"; then
 
             # --- description: required, non-empty, max 1024 chars ---
             # Ref: agentskills-specification.mdx L50 (max 1024 chars, non-empty)
-            fm_desc=$(echo "$frontmatter" | awk '/^description:/{sub(/^description:[[:space:]]*/, ""); print; exit}')
+            fm_desc=$(echo "$fm_json" | jq -r '.description // ""')
             if [[ -z "$fm_desc" ]]; then
                 echo "Error: No frontmatter 'description' (or empty value) in $skill_file" >&2
                 errors=$((errors + 1))
@@ -837,7 +969,7 @@ if ! should_skip "skills"; then
 
             # --- compatibility: max 500 chars if present ---
             # Ref: agentskills-specification.mdx L52 (max 500 characters)
-            fm_compat=$(echo "$frontmatter" | awk '/^compatibility:/{sub(/^compatibility:[[:space:]]*/, ""); print; exit}')
+            fm_compat=$(echo "$fm_json" | jq -r '.compatibility // ""')
             if [[ -n "$fm_compat" && ${#fm_compat} -gt 500 ]]; then
                 echo "Error: Compatibility exceeds 500-char limit (${#fm_compat} chars) in $skill_file" >&2
                 errors=$((errors + 1))
@@ -850,20 +982,54 @@ if ! should_skip "skills"; then
                 # Check against spec allowlist
                 if ! echo " $allowed_fm_fields " | grep -q " $field_name "; then
                     if echo " $known_extensions " | grep -q " $field_name "; then
-                        echo "Warning: '$field_name' is not part of the Agent Skills specification; may not be portable across agents ($skill_file)" >&2
+                        detail "Warning: '$field_name' is not part of the Agent Skills specification; may not be portable across agents ($skill_file)"
                     else
                         echo "Error: Unexpected frontmatter field '$field_name' in $skill_file (allowed: $allowed_fm_fields)" >&2
                         errors=$((errors + 1))
                     fi
                 fi
-            done < <(echo "$frontmatter" | grep -E '^[a-zA-Z]' | sed 's/:.*//')
+            done < <(echo "$fm_json" | jq -r 'keys[]')
+
+            # --- Quality: description too short ---
+            if [[ -n "$fm_desc" && ${#fm_desc} -lt 20 ]]; then
+                echo "Warning: Description is only ${#fm_desc} chars (consider ≥20 for agent matching) in $skill_file" >&2
+            fi
+
+            # --- Quality: description missing trigger language ---
+            if [[ -n "$fm_desc" ]] && ! echo "$fm_desc" | grep -qiE 'use when|use for|use if|use this|when you need|invoke when|trigger when|designed for'; then
+                echo "Warning: Description lacks trigger language (e.g. 'use when ...') in $skill_file" >&2
+            fi
+
+            # --- Quality: body checks (empty, too long, broken links) ---
+            skill_body=$(awk '/^---$/{if(++c==2){body=1; next}} body{print}' "$skill_file")
+            skill_body_stripped=$(echo "$skill_body" | sed '/^[[:space:]]*$/d')
+
+            if [[ -z "$skill_body_stripped" ]]; then
+                echo "Warning: SKILL.md body is empty (no instructions after frontmatter) in $skill_file" >&2
+            else
+                body_lines=$(echo "$skill_body" | wc -l | tr -d ' ')
+                if [[ "$body_lines" -gt 500 ]]; then
+                    echo "Warning: SKILL.md body is $body_lines lines (recommended <500) in $skill_file" >&2
+                fi
+
+                # Check for broken local links in body
+                # Strip inline code spans (``...`` then `...`) before extracting
+                # links to avoid false positives on examples like `](path)`.
+                # shellcheck disable=SC2016  # backtick patterns are literal sed matches
+                while IFS= read -r link_target; do
+                    [[ -z "$link_target" ]] && continue
+                    if [[ ! -e "$skill_dir/$link_target" ]]; then
+                        echo "Warning: Broken link target '$link_target' in $skill_file" >&2
+                    fi
+                done < <(echo "$skill_body" | sed 's/``[^`]*``//g' | sed 's/`[^`]*`//g' \
+                    | grep -oE '\]\(([^)]+)\)' | sed 's/\](//' | sed 's/)//' \
+                    | grep -vE '^(https?://|mailto:|#)' | sed 's/#.*//' | grep -v '^$')
+            fi
 
         done < <(find -P "${skill_dirs[@]}" -name "SKILL.md" -print0)
 
         info "=== Checking for duplicate skill names ==="
-        dupes=$(find -P "${skill_dirs[@]}" -name "SKILL.md" -print0 | xargs -0 -I{} \
-            awk '/^---$/{if(++c==2)exit} c==1 && /^name:/{sub(/^name:[[:space:]]*/, ""); print}' {} \
-            | sort | uniq -d)
+        dupes=$(printf '%s\n' "${validated_skill_names[@]}" | sort | uniq -d)
         if [[ -n "$dupes" ]]; then
             echo "Error: Duplicate skill names found:" >&2
             echo "$dupes" >&2
@@ -1000,6 +1166,45 @@ if $CHECK_DEPLOY; then
                 fi
             fi
         fi
+
+        # Gemini skills deployment check (gemini skills list)
+        # Verifies repo skills are installed via Gemini's first-class skill management.
+        # Only runs when gemini-extension.json is present (Gemini extension context).
+        if [[ -f "gemini-extension.json" ]]; then
+            deploy_ge_skill_names=()
+            for sd in skills .agents/skills .claude/skills .opencode/skills; do
+                [[ -d "$sd" ]] || continue
+                while IFS= read -r -d '' skill_file; do
+
+                    deploy_err_file=$(mktemp)
+                    fm_name=$(awk '/^---$/{if(++c==2)exit; next} c==1{print}' "$skill_file" | npx --yes "js-yaml@${JS_YAML_VERSION}" 2>"$deploy_err_file" | jq -r '.name // empty' 2>>"$deploy_err_file") || true
+                    if [[ -n "$fm_name" ]]; then
+                        deploy_ge_skill_names+=("$fm_name")
+                    else
+                        echo "Warning: Could not extract skill name from $skill_file" >&2
+                        detail "  $(cat "$deploy_err_file")"
+                    fi
+                    rm -f "$deploy_err_file"
+                done < <(find -P "$sd" -name "SKILL.md" -print0)
+            done
+            if [[ ${#deploy_ge_skill_names[@]} -gt 0 ]]; then
+                info "=== Checking deployment (Gemini skills) ==="
+                if ge_skills_list=$(gemini skills list 2>&1); then
+                    for skill_name in "${deploy_ge_skill_names[@]}"; do
+                        if echo "$ge_skills_list" | grep -qE "(^|[[:space:]])${skill_name}([[:space:]]|$)"; then
+                            info "  ✓ skill ${skill_name}: registered"
+                        else
+                            echo "Error: skill ${skill_name}: not found in gemini skills list" >&2
+                            errors=$((errors + 1))
+                        fi
+                    done
+                else
+                    echo "Error: gemini skills list failed" >&2
+                    detail "  $ge_skills_list"
+                    errors=$((errors + 1))
+                fi
+            fi
+        fi
     else
         detail "Gemini CLI not found, skipping deployment check"
     fi
@@ -1014,8 +1219,16 @@ if $CHECK_DEPLOY; then
     for sd in skills .agents/skills .claude/skills .opencode/skills; do
         [[ -d "$sd" ]] || continue
         while IFS= read -r -d '' skill_file; do
-            fm_name=$(awk '/^---$/{if(++c==2)exit; next} c==1 && /^name:/{sub(/^name:[[:space:]]*/, ""); print; exit}' "$skill_file")
-            [[ -n "$fm_name" ]] && deploy_skill_names+=("$fm_name")
+
+            deploy_err_file=$(mktemp)
+            fm_name=$(awk '/^---$/{if(++c==2)exit; next} c==1{print}' "$skill_file" | npx --yes "js-yaml@${JS_YAML_VERSION}" 2>"$deploy_err_file" | jq -r '.name // empty' 2>>"$deploy_err_file") || true
+            if [[ -n "$fm_name" ]]; then
+                deploy_skill_names+=("$fm_name")
+            else
+                echo "Warning: Could not extract skill name from $skill_file" >&2
+                detail "  $(cat "$deploy_err_file")"
+            fi
+            rm -f "$deploy_err_file"
         done < <(find -P "$sd" -name "SKILL.md" -print0)
     done
 
