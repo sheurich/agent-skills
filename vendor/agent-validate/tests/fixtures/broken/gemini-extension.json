@@ -1,6 +1,0 @@
-{
-  "name": "mismatched-name",
-  "description": "Different description",
-  "version": "9.9.9",
-  "contextFileName": "nonexistent.md"
-}

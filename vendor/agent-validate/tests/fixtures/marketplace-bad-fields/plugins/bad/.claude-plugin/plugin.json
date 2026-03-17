@@ -1,6 +1,0 @@
-{
-  "name": "bad",
-  "description": "Bad plugin",
-  "version": "1.0.0",
-  "bogus_field": "should fail"
-}
