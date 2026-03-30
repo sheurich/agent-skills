@@ -121,6 +121,7 @@ export default function (pi: ExtensionAPI) {
   let model: Model<Api> | undefined;
   const queue: string[] = [];
   let drainPromise = Promise.resolve();
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   pi.on("session_start", async (_event, newCtx) => {
     ctx = newCtx;
@@ -145,6 +146,20 @@ export default function (pi: ExtensionAPI) {
   });
 
   function scheduleDrain() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      drainPromise = drainPromise
+        .then(() => (queue.length > 0 ? drain() : undefined))
+        .catch(() => {});
+    }, 3000);
+  }
+
+  function drainNow() {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
     drainPromise = drainPromise
       .then(() => (queue.length > 0 ? drain() : undefined))
       .catch(() => {});
@@ -222,7 +237,7 @@ ${combined}`;
       summary = "";
       queue.push(delta);
       cmdCtx.ui.notify("Updating session name...", "info");
-      scheduleDrain();
+      drainNow();
       await drainPromise;
 
       if (!title || !summary) {
