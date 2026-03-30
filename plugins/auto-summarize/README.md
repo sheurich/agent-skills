@@ -65,8 +65,9 @@ state from the most recent `auto-summary` entry.
 
 ## Requirements
 
-Claude Haiku 4.5 (or a model whose ID contains `haiku-4-5`) must be
-available in the model registry.
+The extension searches the model registry for a cheap, fast model in
+preference order: Claude Haiku 4.5, then GPT-5.4 mini. At least one
+must be available with valid credentials.
 
 ## License
 

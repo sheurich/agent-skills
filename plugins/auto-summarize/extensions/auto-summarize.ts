@@ -166,7 +166,7 @@ export default function (pi: ExtensionAPI) {
     ].join("\n");
 
     try {
-      const model = findHaikuModel();
+      const model = findSummaryModel();
       if (!model) return;
 
       const auth = await getAuth(model);
@@ -212,18 +212,24 @@ export default function (pi: ExtensionAPI) {
 
   // --- Model resolution ---
 
-  /** Model ID substring to search for. Prefer the custom Bedrock inference profile. */
-  const MODEL_SEARCH = "haiku-4-5";
+  /** Ranked model preferences: cheap and fast summarization models. */
+  const MODEL_PREFERENCES = ["haiku-4-5", "gpt-5.4-mini"];
 
-  function findHaikuModel(): any {
+  function findSummaryModel(): any {
     if (cachedModel) return cachedModel;
     if (!storedCtx) return null;
 
     try {
       const all = storedCtx.modelRegistry.getAll();
-      // Prefer ARN (custom inference profile) over built-in ID.
-      const matches = all.filter((m: any) => (m.id ?? "").includes(MODEL_SEARCH));
-      cachedModel = matches.find((m: any) => m.id.startsWith("arn:")) ?? matches[0] ?? null;
+      for (const search of MODEL_PREFERENCES) {
+        const matches = all.filter((m: any) => (m.id ?? "").includes(search));
+        // Prefer ARN (custom inference profile) over built-in ID.
+        const pick = matches.find((m: any) => m.id.startsWith("arn:")) ?? matches[0];
+        if (pick) {
+          cachedModel = pick;
+          return cachedModel;
+        }
+      }
     } catch {
       // Fall through.
     }
