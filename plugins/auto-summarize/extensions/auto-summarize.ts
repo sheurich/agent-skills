@@ -1,5 +1,17 @@
-import { complete } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+/**
+ * Auto-Summarize Extension
+ *
+ * Maintains a rolling session summary and title in the background.
+ * After each agent turn, sends the conversation delta to a cheap model
+ * and persists the result as a custom session entry.
+ *
+ * Commands:
+ *   /summary   - show the current summary
+ *   /autoname  - force a full re-summarize from the entire branch
+ */
+
+import { complete, getModel, type Api, type Model } from "@mariozechner/pi-ai";
+import type { CustomEntry, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 
 type ContentBlock = {
   type?: string;
@@ -8,46 +20,55 @@ type ContentBlock = {
   arguments?: Record<string, unknown>;
 };
 
-type AgentEndMessage = {
-  role?: string;
-  content?: unknown;
-};
+type SummaryData = { title: string; summary: string };
+type SummaryEntry = CustomEntry<SummaryData>;
 
-/** Maximum characters per message text in a delta. */
 const MAX_MESSAGE_CHARS = 4000;
-
-/** Maximum total characters for a combined delta payload. */
 const MAX_DELTA_CHARS = 16000;
 
-/** Truncate a string to a character budget with a marker. */
 const truncate = (s: string, max: number): string =>
   s.length <= max ? s : s.slice(0, max - 12) + "\n[truncated]";
 
-/** Extract text from a message content field. */
-const extractText = (content: unknown): string => {
+const SUMMARIZE_PROMPT = `\
+You maintain a rolling summary of a coding agent session.
+Given the current summary and the latest turn, produce an updated summary and a short title.
+
+Rules:
+- The summary captures goals, key decisions, progress, and next steps.
+- The summary is concise: 3-8 bullet points, not prose paragraphs.
+- The title is ≤72 characters, lowercase, format: \`topic: what happened\`.
+- If the session just started, derive both from the turn alone.
+- Drop stale information that has been superseded.
+
+Respond with ONLY a JSON object (no markdown fences):
+{"title": "...", "summary": "..."}`;
+
+function extractText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
-  return (content as ContentBlock[])
-    .filter((b) => b.type === "text" && typeof b.text === "string")
-    .map((b) => b.text!)
-    .join("\n");
-};
 
-/** Extract tool call signatures from assistant content (arg keys only, no values). */
-const extractToolCalls = (content: unknown): string[] => {
+  const parts: string[] = [];
+  for (const block of content as ContentBlock[]) {
+    if (block.type === "text" && typeof block.text === "string") {
+      parts.push(block.text);
+    }
+  }
+  return parts.join("\n");
+}
+
+function extractToolCalls(content: unknown): string[] {
   if (!Array.isArray(content)) return [];
-  return (content as ContentBlock[])
-    .filter((b) => b.type === "toolCall" && typeof b.name === "string")
-    .map((b) => {
-      const args = b.arguments ?? {};
-      const argKeys = Object.keys(args).slice(0, 3);
-      const brief = argKeys.length > 0 ? argKeys.join(", ") : "";
-      return brief ? `[tool: ${b.name}(${brief})]` : `[tool: ${b.name}]`;
-    });
-};
 
-/** Build a concise delta string from the messages produced in one agent turn. */
-const buildTurnDelta = (messages: AgentEndMessage[]): string => {
+  const calls: string[] = [];
+  for (const block of content as ContentBlock[]) {
+    if (block.type !== "toolCall" || typeof block.name !== "string") continue;
+    const keys = Object.keys(block.arguments ?? {}).slice(0, 3);
+    calls.push(keys.length > 0 ? `[tool: ${block.name}(${keys.join(", ")})]` : `[tool: ${block.name}]`);
+  }
+  return calls;
+}
+
+function buildDelta(messages: Array<{ role?: string; content?: unknown }>): string {
   const parts: string[] = [];
   for (const msg of messages) {
     if (!msg.role) continue;
@@ -62,29 +83,12 @@ const buildTurnDelta = (messages: AgentEndMessage[]): string => {
     }
   }
   return truncate(parts.join("\n\n"), MAX_DELTA_CHARS);
-};
+}
 
-const SUMMARIZE_PROMPT = [
-  "You maintain a rolling summary of a coding agent session.",
-  "Given the current summary and the latest turn, produce an updated summary and a short title.",
-  "",
-  "Rules:",
-  "- The summary captures goals, key decisions, progress, and next steps.",
-  "- The summary is concise: 3-8 bullet points, not prose paragraphs.",
-  "- The title is ≤72 characters, lowercase, format: `topic: what happened`.",
-  "- If the session just started, derive both from the turn alone.",
-  "- Drop stale information that has been superseded.",
-  "",
-  "Respond with ONLY a JSON object (no markdown fences):",
-  '{"title": "...", "summary": "..."}',
-].join("\n");
-
-/** Parse JSON from LLM output, tolerating markdown fences and array summaries. */
-function parseJson(text: string): { title?: string; summary?: string } | null {
+function parseJson(text: string): SummaryData | null {
   try {
     const cleaned = text.replace(/^```(?:json)?\s*/m, "").replace(/\s*```\s*$/m, "");
     const obj = JSON.parse(cleaned);
-    // Normalize summary: Haiku sometimes returns an array of bullet points.
     if (Array.isArray(obj.summary)) {
       obj.summary = obj.summary.map((s: string) => `- ${s}`).join("\n");
     }
@@ -94,98 +98,81 @@ function parseJson(text: string): { title?: string; summary?: string } | null {
   }
 }
 
+/** Try known cheap models in preference order. */
+function findModel(ctx: ExtensionContext): Model<Api> | undefined {
+  // Prefer Bedrock ARN over direct Anthropic (custom inference profiles).
+  const all = ctx.modelRegistry.getAll();
+  const bedrock = all.find((m) => m.id.includes("haiku-4-5") && m.id.startsWith("arn:"));
+  if (bedrock) return bedrock;
+
+  return (
+    ctx.modelRegistry.find("anthropic", "claude-haiku-4-5") ??
+    ctx.modelRegistry.find("openai", "gpt-5.4-mini")
+  );
+}
+
 export default function (pi: ExtensionAPI) {
-  let currentSummary = "";
-  let currentTitle = "";
-  let storedCtx: ExtensionContext | null = null;
-  let cachedModel: any = null;
-  const deltaQueue: string[] = [];
-  let drainPromise: Promise<void> = Promise.resolve();
+  let summary = "";
+  let title = "";
+  let ctx: ExtensionContext | null = null; // cached for background drains
+  let model: Model<Api> | undefined;
+  const queue: string[] = [];
+  let drainPromise = Promise.resolve();
 
-  // --- Lifecycle ---
+  pi.on("session_start", async (_event, newCtx) => {
+    ctx = newCtx;
+    model = undefined;
+    summary = "";
+    title = "";
 
-  pi.on("session_start", async (_event, ctx) => {
-    storedCtx = ctx;
-    cachedModel = null;
-    currentSummary = "";
-    currentTitle = "";
-
-    // Restore state from the most recent auto-summary entry on this branch.
-    for (const entry of ctx.sessionManager.getBranch()) {
-      if (entry.type === "custom" && (entry as any).customType === "auto-summary") {
-        const data = (entry as any).data;
-        currentSummary = data?.summary ?? "";
-        currentTitle = data?.title ?? "";
+    for (const entry of newCtx.sessionManager.getBranch()) {
+      if (entry.type === "custom" && (entry as SummaryEntry).customType === "auto-summary") {
+        const data = (entry as SummaryEntry).data;
+        summary = data?.summary ?? "";
+        title = data?.title ?? "";
       }
     }
   });
 
-  // Queue a delta after every agent turn.
   pi.on("agent_end", async (event) => {
-    const delta = buildTurnDelta(event.messages as AgentEndMessage[]);
+    const delta = buildDelta(event.messages as Array<{ role?: string; content?: unknown }>);
     if (!delta.trim()) return;
-    deltaQueue.push(delta);
+    queue.push(delta);
     scheduleDrain();
   });
 
-  // --- Serialized drain loop ---
-
-  /** Schedule a drain that waits for any in-flight drain to finish first. */
   function scheduleDrain() {
-    drainPromise = drainPromise.then(() => {
-      if (deltaQueue.length === 0) return;
-      return drain();
-    }).catch(() => {
-      // Silent — don't disrupt the session for a background task.
-    });
-  }
-
-  /** Await the current drain chain (used by /autoname). */
-  async function awaitDrain(): Promise<void> {
-    await drainPromise;
+    drainPromise = drainPromise
+      .then(() => (queue.length > 0 ? drain() : undefined))
+      .catch(() => {});
   }
 
   async function drain() {
-    if (deltaQueue.length === 0) return;
+    if (!ctx || queue.length === 0) return;
 
-    // Confirm model and auth before consuming deltas so that transient
-    // failures (model not yet registered, auth not yet available) don't
-    // permanently discard queued turns.
-    const model = findSummaryModel();
-    if (!model) return;
+    const m = model ?? (model = findModel(ctx));
+    if (!m) return;
 
-    const auth = await getAuth(model);
-    if (!auth) return;
+    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
+    if (!auth.ok || !auth.apiKey) return;
 
-    const deltas = deltaQueue.splice(0);
-
+    // Consume queue only after confirming model + auth are available.
+    const deltas = queue.splice(0);
     const combined = truncate(deltas.join("\n---\n"), MAX_DELTA_CHARS);
-    const prompt = [
-      SUMMARIZE_PROMPT,
-      "",
-      "## Current summary",
-      currentSummary || "(new session — no summary yet)",
-      "",
-      deltas.length > 1 ? `## Latest turns (${deltas.length} combined)` : "## Latest turn",
-      combined,
-    ].join("\n");
+
+    const prompt = `${SUMMARIZE_PROMPT}
+
+## Current summary
+${summary || "(new session — no summary yet)"}
+
+## ${deltas.length > 1 ? `Latest turns (${deltas.length} combined)` : "Latest turn"}
+${combined}`;
 
     try {
       const response = await complete(
-        model,
-        {
-          messages: [
-            {
-              role: "user" as const,
-              content: [{ type: "text" as const, text: prompt }],
-              timestamp: Date.now(),
-            },
-          ],
-        },
-        {
-          apiKey: auth.apiKey,
-          headers: auth.headers,
-        },
+        m,
+        { messages: [{ role: "user" as const, content: [{ type: "text" as const, text: prompt }], timestamp: Date.now() }] },
+        { apiKey: auth.apiKey, headers: auth.headers },
       );
 
       const text = response.content
@@ -197,95 +184,62 @@ export default function (pi: ExtensionAPI) {
       if (!parsed) return;
 
       if (parsed.title) {
-        currentTitle = parsed.title;
-        pi.setSessionName(currentTitle);
+        title = parsed.title;
+        pi.setSessionName(title);
       }
       if (parsed.summary) {
-        currentSummary = parsed.summary;
+        summary = parsed.summary;
       }
-      pi.appendEntry("auto-summary", { title: currentTitle, summary: currentSummary });
+      pi.appendEntry("auto-summary", { title, summary } satisfies SummaryData);
     } catch {
-      // Silent failure — don't disrupt the session for a background task.
+      // Background task — never disrupt the session.
     }
   }
-
-  // --- Model resolution ---
-
-  /** Ranked model preferences: cheap and fast summarization models. */
-  const MODEL_PREFERENCES = ["haiku-4-5", "gpt-5.4-mini"];
-
-  function findSummaryModel(): any {
-    if (cachedModel) return cachedModel;
-    if (!storedCtx) return null;
-
-    try {
-      const all = storedCtx.modelRegistry.getAll();
-      for (const search of MODEL_PREFERENCES) {
-        const matches = all.filter((m: any) => (m.id ?? "").includes(search));
-        // Prefer ARN (custom inference profile) over built-in ID.
-        const pick = matches.find((m: any) => m.id.startsWith("arn:")) ?? matches[0];
-        if (pick) {
-          cachedModel = pick;
-          return cachedModel;
-        }
-      }
-    } catch {
-      // Fall through.
-    }
-    return cachedModel;
-  }
-
-  async function getAuth(model: any): Promise<{ apiKey?: string; headers?: Record<string, string> } | null> {
-    if (!storedCtx) return null;
-    const auth = await storedCtx.modelRegistry.getApiKeyAndHeaders(model);
-    if (!auth.ok) return null;
-    return { apiKey: auth.apiKey, headers: auth.headers };
-  }
-
-  // --- Commands ---
 
   pi.registerCommand("autoname", {
     description: "Force an immediate session name + summary update",
-    handler: async (_args, ctx) => {
-      storedCtx = ctx;
-      const branch = ctx.sessionManager.getBranch();
-      const messages = branch
-        .filter((e: any) => e.type === "message" && e.message)
-        .map((e: any) => e.message);
-      const delta = buildTurnDelta(messages);
+    handler: async (_args, cmdCtx) => {
+      ctx = cmdCtx;
+      const messages = cmdCtx.sessionManager
+        .getBranch()
+        .filter((e): e is { type: "message"; message: { role?: string; content?: unknown } } & typeof e =>
+          e.type === "message" && "message" in e,
+        )
+        .map((e) => e.message);
+
+      const delta = buildDelta(messages);
       if (!delta.trim()) {
-        ctx.ui.notify("No conversation to summarize", "warning");
+        cmdCtx.ui.notify("No conversation to summarize", "warning");
         return;
       }
-      // Full re-summarize: save state, clear both title and summary,
-      // then restore on failure.
-      const savedTitle = currentTitle;
-      const savedSummary = currentSummary;
-      currentTitle = "";
-      currentSummary = "";
-      deltaQueue.push(delta);
-      ctx.ui.notify("Updating session name...", "info");
-      // Enqueue and await — serialized with any background drain.
+
+      const savedTitle = title;
+      const savedSummary = summary;
+      title = "";
+      summary = "";
+      queue.push(delta);
+      cmdCtx.ui.notify("Updating session name...", "info");
       scheduleDrain();
-      await awaitDrain();
-      if (!currentTitle || !currentSummary) {
-        currentTitle = savedTitle;
-        currentSummary = savedSummary;
-        ctx.ui.notify("Failed to generate name", "warning");
+      await drainPromise;
+
+      if (!title || !summary) {
+        title = savedTitle;
+        summary = savedSummary;
+        cmdCtx.ui.notify("Failed to generate name", "warning");
       } else {
-        ctx.ui.notify(`Session: ${currentTitle}`, "success");
+        cmdCtx.ui.notify(`Session: ${title}`, "success");
       }
     },
   });
 
   pi.registerCommand("summary", {
     description: "Show the current rolling session summary",
-    handler: async (_args, ctx) => {
-      if (!currentSummary) {
-        ctx.ui.notify("No summary yet — will generate after the next turn", "info");
+    handler: async (_args, cmdCtx) => {
+      if (!summary) {
+        cmdCtx.ui.notify("No summary yet — will generate after the next turn", "info");
         return;
       }
-      ctx.ui.notify(`${currentTitle}\n\n${currentSummary}`, "info");
+      cmdCtx.ui.notify(`${title}\n\n${summary}`, "info");
     },
   });
 }
