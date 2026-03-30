@@ -29,6 +29,9 @@ const MAX_DELTA_CHARS = 16000;
 const truncate = (s: string, max: number): string =>
   s.length <= max ? s : s.slice(0, max - 12) + "\n[truncated]";
 
+const truncateTail = (s: string, max: number): string =>
+  s.length <= max ? s : "[truncated]\n" + s.slice(s.length - max + 12);
+
 const SUMMARIZE_PROMPT = `\
 You maintain a rolling summary of a coding agent session.
 Given the current summary and the latest turn, produce an updated summary and a short title.
@@ -82,7 +85,7 @@ function buildDelta(messages: Array<{ role?: string; content?: unknown }>): stri
       if (tools.length > 0) parts.push(tools.join("\n"));
     }
   }
-  return truncate(parts.join("\n\n"), MAX_DELTA_CHARS);
+  return truncateTail(parts.join("\n\n"), MAX_DELTA_CHARS);
 }
 
 function parseJson(text: string): SummaryData | null {
