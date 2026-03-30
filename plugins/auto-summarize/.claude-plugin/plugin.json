@@ -1,0 +1,8 @@
+{
+  "name": "auto-summarize",
+  "description": "Rolling session summary and automatic session naming for Pi",
+  "version": "1.0.0",
+  "author": {
+    "name": "Shiloh Heurich"
+  }
+}
