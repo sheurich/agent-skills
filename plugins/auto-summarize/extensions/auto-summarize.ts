@@ -33,21 +33,16 @@ const extractText = (content: unknown): string => {
     .join("\n");
 };
 
-/** Extract tool call signatures from assistant content. */
+/** Extract tool call signatures from assistant content (arg keys only, no values). */
 const extractToolCalls = (content: unknown): string[] => {
   if (!Array.isArray(content)) return [];
   return (content as ContentBlock[])
     .filter((b) => b.type === "toolCall" && typeof b.name === "string")
     .map((b) => {
       const args = b.arguments ?? {};
-      const brief = Object.entries(args)
-        .slice(0, 3)
-        .map(([k, v]) => {
-          const s = typeof v === "string" ? v : JSON.stringify(v);
-          return `${k}=${s.length > 80 ? s.slice(0, 77) + "..." : s}`;
-        })
-        .join(", ");
-      return `[tool: ${b.name}(${brief})]`;
+      const argKeys = Object.keys(args).slice(0, 3);
+      const brief = argKeys.length > 0 ? argKeys.join(", ") : "";
+      return brief ? `[tool: ${b.name}(${brief})]` : `[tool: ${b.name}]`;
     });
 };
 
@@ -151,8 +146,18 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function drain() {
+    if (deltaQueue.length === 0) return;
+
+    // Confirm model and auth before consuming deltas so that transient
+    // failures (model not yet registered, auth not yet available) don't
+    // permanently discard queued turns.
+    const model = findSummaryModel();
+    if (!model) return;
+
+    const auth = await getAuth(model);
+    if (!auth) return;
+
     const deltas = deltaQueue.splice(0);
-    if (deltas.length === 0) return;
 
     const combined = truncate(deltas.join("\n---\n"), MAX_DELTA_CHARS);
     const prompt = [
@@ -166,12 +171,6 @@ export default function (pi: ExtensionAPI) {
     ].join("\n");
 
     try {
-      const model = findSummaryModel();
-      if (!model) return;
-
-      const auth = await getAuth(model);
-      if (!auth) return;
-
       const response = await complete(
         model,
         {
