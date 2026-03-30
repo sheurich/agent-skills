@@ -10,7 +10,7 @@
  *   /autoname  - force a full re-summarize from the entire branch
  */
 
-import { complete, getModel, type Api, type Model } from "@mariozechner/pi-ai";
+import { complete, type Api, type Model } from "@mariozechner/pi-ai";
 import type { CustomEntry, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 
 type ContentBlock = {
@@ -25,6 +25,7 @@ type SummaryEntry = CustomEntry<SummaryData>;
 
 const MAX_MESSAGE_CHARS = 4000;
 const MAX_DELTA_CHARS = 16000;
+const MAX_QUEUE_SIZE = 50;
 
 const truncate = (s: string, max: number): string =>
   s.length <= max ? s : s.slice(0, max - 12) + "\n[truncated]";
@@ -92,10 +93,16 @@ function parseJson(text: string): SummaryData | null {
   try {
     const cleaned = text.replace(/^```(?:json)?\s*/m, "").replace(/\s*```\s*$/m, "");
     const obj = JSON.parse(cleaned);
-    if (Array.isArray(obj.summary)) {
-      obj.summary = obj.summary.map((s: string) => `- ${s}`).join("\n");
+    if (!obj || typeof obj !== "object") return null;
+
+    let { title, summary } = obj as { title?: unknown; summary?: unknown };
+
+    if (Array.isArray(summary)) {
+      summary = summary.map((s) => `- ${String(s).trim()}`).join("\n");
     }
-    return obj;
+
+    if (typeof title !== "string" || typeof summary !== "string") return null;
+    return { title, summary };
   } catch {
     return null;
   }
@@ -142,6 +149,7 @@ export default function (pi: ExtensionAPI) {
     const delta = buildDelta(event.messages as Array<{ role?: string; content?: unknown }>);
     if (!delta.trim()) return;
     queue.push(delta);
+    if (queue.length > MAX_QUEUE_SIZE) queue.splice(0, queue.length - MAX_QUEUE_SIZE);
     scheduleDrain();
   });
 
