@@ -17,6 +17,11 @@
         "./skills/readiness-review",
         "./skills/skill-authoring"
       ]
+    },
+    {
+      "name": "auto-summarize",
+      "description": "Rolling session summary and automatic session naming for Pi",
+      "source": "./plugins/auto-summarize"
     }
   ]
 }
