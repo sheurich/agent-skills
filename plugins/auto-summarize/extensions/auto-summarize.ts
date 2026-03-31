@@ -255,6 +255,7 @@ ${combined}`;
       const savedSummary = summary;
       title = "";
       summary = "";
+      queue.length = 0;
       queue.push(delta);
       cmdCtx.ui.notify("Updating session name...", "info");
       drainNow();
