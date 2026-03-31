@@ -131,6 +131,14 @@ export default function (pi: ExtensionAPI) {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   pi.on("session_start", async (_event, newCtx) => {
+    // Clear pending async state from the previous session.
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    queue.length = 0;
+    drainPromise = Promise.resolve();
+
     ctx = newCtx;
     model = undefined;
     summary = "";
