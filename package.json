@@ -1,0 +1,16 @@
+{
+  "name": "agent-skills",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cross-agent skills and Pi extensions",
+  "keywords": [
+    "pi-package"
+  ],
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./plugins/auto-summarize/extensions"
+    ],
+    "skills": []
+  }
+}
