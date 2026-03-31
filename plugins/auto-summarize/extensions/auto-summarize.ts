@@ -184,7 +184,7 @@ export default function (pi: ExtensionAPI) {
 
     // Consume queue only after confirming model + auth are available.
     const deltas = queue.splice(0);
-    const combined = truncate(deltas.join("\n---\n"), MAX_DELTA_CHARS);
+    const combined = truncateTail(deltas.join("\n---\n"), MAX_DELTA_CHARS);
 
     const prompt = `${SUMMARIZE_PROMPT}
 
