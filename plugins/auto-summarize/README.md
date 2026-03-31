@@ -3,8 +3,8 @@
 Rolling session summary and automatic session naming for
 [Pi](https://github.com/nicorevin/pi-coding-agent).
 
-After every agent turn, the extension sends the conversation delta to
-Claude Haiku 4.5 in the background and maintains a concise bullet-point
+After every agent turn, the extension sends the conversation delta to a
+cheap model (Claude Haiku 4.5 or GPT-5.4 mini) in the background and maintains a concise bullet-point
 summary plus a short session title. The summary survives session reloads
 and compactions.
 
@@ -41,8 +41,9 @@ pi install /path/to/plugins/auto-summarize
    title and summary are written as a custom `auto-summary` entry via
    `pi.appendEntry()`.
 
-On `session_start`, the extension walks the current branch and restores
-state from the most recent `auto-summary` entry.
+On `session_start`, `session_switch`, and `session_fork`, the extension
+clears pending async state and restores the summary from the most recent
+`auto-summary` entry in the new session's branch.
 
 ## Commands
 
@@ -66,8 +67,9 @@ state from the most recent `auto-summary` entry.
 ## Requirements
 
 The extension searches the model registry for a cheap, fast model in
-preference order: Claude Haiku 4.5, then GPT-5.4 mini. At least one
-must be available with valid credentials.
+preference order: Bedrock Haiku 4.5 ARN, direct Anthropic Haiku 4.5,
+then GPT-5.4 mini. At least one must be available with valid API key
+credentials.
 
 ## License
 

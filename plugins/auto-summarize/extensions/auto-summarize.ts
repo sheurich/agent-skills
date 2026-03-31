@@ -130,8 +130,8 @@ export default function (pi: ExtensionAPI) {
   let drainPromise = Promise.resolve();
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  pi.on("session_start", async (_event, newCtx) => {
-    // Clear pending async state from the previous session.
+  /** Reset all mutable state and restore summary from the new session's branch. */
+  function resetForSession(newCtx: ExtensionContext) {
     if (debounceTimer) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
@@ -151,7 +151,11 @@ export default function (pi: ExtensionAPI) {
         title = data?.title ?? "";
       }
     }
-  });
+  }
+
+  pi.on("session_start", async (_event, newCtx) => resetForSession(newCtx));
+  pi.on("session_switch", async (_event, newCtx) => resetForSession(newCtx));
+  pi.on("session_fork", async (_event, newCtx) => resetForSession(newCtx));
 
   pi.on("agent_end", async (event) => {
     const delta = buildDelta(event.messages as Array<{ role?: string; content?: unknown }>);
