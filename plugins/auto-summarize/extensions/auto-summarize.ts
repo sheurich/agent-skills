@@ -128,8 +128,10 @@ function findModel(ctx: ExtensionContext): Model<Api> | undefined {
   for (const substr of CHEAP_MODEL_CANDIDATES) {
     const matches = all.filter((m) => m.id.includes(substr) && ctx.modelRegistry.hasConfiguredAuth(m));
     if (matches.length === 0) continue;
-    // Prefer ARN (custom Bedrock inference profile) when available.
-    return matches.find((m) => m.id.startsWith("arn:")) ?? matches[0];
+    // Prefer: ARN (custom inference profile) > global cross-region > first match.
+    return matches.find((m) => m.id.startsWith("arn:"))
+      ?? matches.find((m) => m.id.startsWith("global."))
+      ?? matches[0];
   }
 
   return undefined;
