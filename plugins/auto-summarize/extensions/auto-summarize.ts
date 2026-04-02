@@ -145,7 +145,6 @@ export default function (pi: ExtensionAPI) {
   const queue: string[] = [];
   let drainPromise = Promise.resolve();
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  let lastDrainError: string | null = null;
   let consecutiveFailures = 0;
   const MAX_RETRIES = 2;
 
@@ -204,26 +203,22 @@ export default function (pi: ExtensionAPI) {
       .catch(() => {});
   }
 
-  async function drain() {
+  async function drain(): Promise<string | undefined> {
     if (!ctx || queue.length === 0) return;
-    lastDrainError = null;
 
     const m = model ?? (model = findModel(ctx));
     if (!m) {
-      lastDrainError = "no cheap model found in registry";
-      return;
+      return "no cheap model found in registry";
     }
 
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
     if (!auth.ok) {
-      lastDrainError = `auth failed for ${m.provider}/${m.id}: ${(auth as { error?: string }).error ?? "unknown"}`;
       model = undefined;
-      return;
+      return `auth failed for ${m.provider}/${m.id}: ${(auth as { error?: string }).error ?? "unknown"}`;
     }
     if (!auth.apiKey) {
-      lastDrainError = `no API key for ${m.provider}/${m.id}`;
       model = undefined;
-      return;
+      return `no API key for ${m.provider}/${m.id}`;
     }
 
     // Consume queue only after confirming model + auth are available.
@@ -252,16 +247,14 @@ ${combined}`;
 
       if (!text) {
         const types = response.content.map((c: { type: string }) => c.type).join(", ") || "empty";
-        lastDrainError = `model returned no text (content types: ${types}; model: ${m.provider}/${m.id})`;
         model = undefined;
-        return;
+        return `model returned no text (content types: ${types}; model: ${m.provider}/${m.id})`;
       }
 
       const parsed = parseJson(text);
       if (!parsed) {
-        lastDrainError = `JSON parse failed: ${truncate(text, 200)}`;
         model = undefined;
-        return;
+        return `JSON parse failed: ${truncate(text, 200)}`;
       }
 
       consecutiveFailures = 0;
@@ -274,7 +267,6 @@ ${combined}`;
       }
       pi.appendEntry("auto-summary", { title, summary } satisfies SummaryData);
     } catch (e: unknown) {
-      lastDrainError = e instanceof Error ? e.message : String(e);
       model = undefined;
       // Restore deltas for retry on transient errors (API exceptions).
       // Parse failures and empty responses are not retryable.
@@ -283,6 +275,7 @@ ${combined}`;
         queue.unshift(...deltas);
         if (queue.length > MAX_QUEUE_SIZE) queue.splice(MAX_QUEUE_SIZE);
       }
+      return e instanceof Error ? e.message : String(e);
     }
   }
 
@@ -310,13 +303,14 @@ ${combined}`;
       queue.length = 0;
       queue.push(delta);
       cmdCtx.ui.notify("Updating session name...", "info");
-      drainNow();
+      if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
       await drainPromise;
+      const drainError = await drain();
 
       if (!title || !summary) {
         title = savedTitle;
         summary = savedSummary;
-        const detail = lastDrainError ? `: ${lastDrainError}` : "";
+        const detail = drainError ? `: ${drainError}` : "";
         cmdCtx.ui.notify(`Failed to generate name${detail}`, "warning");
       } else {
         cmdCtx.ui.notify(`Session: ${title}`, "success");
