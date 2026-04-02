@@ -10,7 +10,6 @@
  *   /autoname  - force a full re-summarize from the entire branch
  */
 
-import { basename } from "path";
 import { complete, type Api, type Model } from "@mariozechner/pi-ai";
 import type { CustomEntry, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 
@@ -296,9 +295,6 @@ ${combined}`;
       if (parsed.title && parsed.title !== title) {
         title = parsed.title;
         pi.setSessionName(title);
-        // setSessionName() persists the name but doesn't update the terminal
-        // title. Write it directly so the tab reflects the name immediately.
-        ctx.ui.setTitle(`\u03C0 - ${title} - ${basename(process.cwd())}`);
       }
       if (parsed.summary) {
         summary = parsed.summary;
