@@ -1,8 +1,8 @@
 {
-  "name": "agent-skills",
+  "name": "sheurich-agent-skills",
   "version": "1.0.0",
   "private": true,
-  "description": "Cross-agent skills and Pi extensions",
+  "description": "Agent skills by Shiloh Heurich",
   "keywords": [
     "pi-package"
   ],
@@ -11,6 +11,8 @@
     "extensions": [
       "./plugins/auto-summarize/extensions"
     ],
-    "skills": []
+    "skills": [
+      "./skills/skill-authoring"
+    ]
   }
 }

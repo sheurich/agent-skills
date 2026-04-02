@@ -22,7 +22,7 @@ npx skills add sheurich/agent-skills -s <skill-name> -g
 | Skill | Description |
 | --- | --- |
 | [readiness-review](skills/readiness-review/SKILL.md) | Structured readiness assessment before proceeding to the next environment or phase. |
-| [skill-authoring](skills/skill-authoring/SKILL.md) | Write and refine agent skills using test-driven development. Use when creating new skills, editing existing skills, or reviewing skill quality. |
+| [skill-authoring](skills/skill-authoring/SKILL.md) | Write and refine agent skills. Use when generating skills from docs, extracting from sessions, designing tool interfaces, managing lifecycle, or writing for dual-harness patterns. |
 
 ## Plugins
 
