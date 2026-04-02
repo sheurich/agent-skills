@@ -35,7 +35,7 @@ If you can't answer at least two of these with something non-trivial, it's proba
 ### Step 0: Check for Existing Skills
 
 Before creating a new skill, search for existing ones that might cover the same ground.
-Look in both user-level and project-level skill directories (e.g., `~/.agents/skills/` and `.agents/skills/`).
+Look in both user-level and project-level skill directories for your harness (for example, `~/.agents/skills/` / `.agents/skills/`, `~/.claude/skills/` / `.claude/skills/`, or `.pi/skills/`). See [platform-guide.md](platform-guide.md) for the full list of discovery locations.
 
 If a related skill exists, consider **updating it** instead of creating a new one. See [skill-lifecycle.md](skill-lifecycle.md) for guidance on when to update vs create.
 

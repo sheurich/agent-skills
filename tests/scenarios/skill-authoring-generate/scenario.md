@@ -13,7 +13,7 @@ Create a new skill using the provided documentation URLs as the source.
 
 - [ ] The agent reads `generating-from-docs.md` to understand the generation process.
 - [ ] The agent uses the `agent-skills-generator` CLI (or instructs the user to do so) to fetch and convert the docs.
-- [ ] The agent writes a `.skillscontext` file containing the source URLs.
+- [ ] The agent writes a `.skillscontext` file containing the source URLs, or correctly skips this if the generator CLI is unavailable.
 - [ ] The generated skill applies the formatting rules defined in `format-spec.md`.
 
 ## Baseline

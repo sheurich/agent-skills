@@ -12,7 +12,7 @@ Create a skill that needs to evaluate a shell command to populate its context.
 ## Criteria
 
 - [ ] The agent reads `platform-guide.md` to understand dual-harness compatibility patterns.
-- [ ] The skill uses the `!` backtick syntax (`!```bash`) for dynamic context.
+- [ ] The skill uses the ``!`command` `` inline syntax for dynamic context.
 - [ ] The skill includes the fallback instruction before the dynamic context block ("If the fields below show commands rather than output, run each one first.").
 - [ ] The skill handles the `$ARGUMENTS` variable portably by mentioning its dual location ("The argument is available as `$ARGUMENTS` or appears after this skill block.").
 

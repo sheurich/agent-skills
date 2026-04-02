@@ -14,7 +14,7 @@ Review the provided `session-transcript.md` fixture and create a new reusable sk
 - [ ] The agent reads `extracting-from-sessions.md` to understand the extraction process.
 - [ ] The agent runs the quality assessment criteria defined in the reference doc on the transcript.
 - [ ] The agent asks the user for confirmation on the extracted skill's scope and name before writing files.
-- [ ] The skill is saved to a harness-appropriate path (e.g., `~/.agents/skills/` or a project `.pi/agents/skills/` directory).
+- [ ] The skill is saved to a harness-appropriate path (e.g., `~/.agents/skills/` or a project `.pi/skills/` directory).
 
 ## Baseline
 

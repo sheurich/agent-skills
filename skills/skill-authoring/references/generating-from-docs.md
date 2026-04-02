@@ -4,7 +4,14 @@ Create skill content by crawling documentation websites.
 
 ## Prerequisites
 
-`agent-skills-generator` CLI (`brew install rodydavis/tap/agent-skills-generator`)
+Check if the generator CLI is available. If not, follow the manual fallback path or install it (macOS: `brew install rodydavis/tap/agent-skills-generator`).
+
+```bash
+if ! command -v agent-skills-generator &> /dev/null; then
+    echo "Warning: agent-skills-generator not found."
+    # Ask the user if they want to install it or fall back to manual crawling
+fi
+```
 
 ## Process
 
