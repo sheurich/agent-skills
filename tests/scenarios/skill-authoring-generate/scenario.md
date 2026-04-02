@@ -25,7 +25,7 @@ Create a new skill using the provided documentation URLs as the source.
 | --- | --- | --- |
 | reads generating-from-docs.md | Pass/Fail | What happened |
 | uses agent-skills-generator | Pass/Fail | What happened |
-| writes .skillscontext | Pass/Fail | What happened |
+| handles .skillscontext | Pass/Fail | What happened |
 | applies format-spec | Pass/Fail | What happened |
 
 ### Run: 2026-04-02 (global.anthropic.claude-opus-4-6-v1)
@@ -37,7 +37,7 @@ Create a new skill using the provided documentation URLs as the source.
 | --- | --- | --- |
 | reads generating-from-docs.md | Fail | Did not read any skill authoring docs. Read `pi-coding-agent/docs/skills.md` instead. |
 | uses agent-skills-generator | Fail | Made no attempt to use the generator CLI. |
-| writes .skillscontext | Fail | Did not write the `.skillscontext` file. |
+| handles .skillscontext | Fail | Did not write the `.skillscontext` file. |
 | applies format-spec | Fail | Created a basic `SKILL.md` file but did not apply specific `format-spec.md` structural rules like `references/` splitting. |
 
 ## With-Skill
@@ -49,7 +49,7 @@ Create a new skill using the provided documentation URLs as the source.
 | --- | --- | --- |
 | reads generating-from-docs.md | Pass/Fail | What happened |
 | uses agent-skills-generator | Pass/Fail | What happened |
-| writes .skillscontext | Pass/Fail | What happened |
+| handles .skillscontext | Pass/Fail | What happened |
 | applies format-spec | Pass/Fail | What happened |
 
 ### Run: 2026-04-02 (global.anthropic.claude-opus-4-6-v1)
@@ -61,7 +61,7 @@ Create a new skill using the provided documentation URLs as the source.
 | --- | --- | --- |
 | reads generating-from-docs.md | Pass | Explicitly read `generating-from-docs.md` (and other reference files) via tool calls. |
 | uses agent-skills-generator | Pass | Attempted `command -v agent-skills-generator` and `brew install rodydavis/tap/agent-skills-generator`, falling back to manual `curl` when unavailable. |
-| writes .skillscontext | Pass | Correctly skipped writing the `.skillscontext` file because it verified the `agent-skills-generator` tool was missing (attempted workflow but aborted on missing dependency). |
+| handles .skillscontext | Pass | Verified `agent-skills-generator` was absent and correctly skipped writing `.skillscontext`, consistent with the conditional criterion. |
 | applies format-spec | Pass | Read `format-spec.md` and correctly extracted heavy API schemas into a `references/` directory (`query-parameters.md` and `response-types.md`). |
 
 ## Analysis

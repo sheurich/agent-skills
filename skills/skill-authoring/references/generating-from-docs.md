@@ -36,10 +36,14 @@ fi
    !https://docs.example.com/guide/changelog/*
    ```
 
-4. **Run crawler:**
+4. **Run crawler** (skip if `agent-skills-generator` is not installed — fall back to manual `curl`/browser download of the docs):
 
    ```bash
-   agent-skills-generator crawl --flat
+   if command -v agent-skills-generator &> /dev/null; then
+       agent-skills-generator crawl --flat
+   else
+       echo "agent-skills-generator not found; fetch docs manually into .skillscache/"
+   fi
    ```
 
 5. **Collect output:**

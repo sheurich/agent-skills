@@ -11,7 +11,7 @@ Design the command-line interface for a new tool that allows agents to list, sta
 ## Criteria
 
 - [ ] The agent reads `tool-design.md` to understand principles for designing tool interfaces.
-- [ ] The suggested design uses typed code (e.g., Python or TypeScript signatures) instead of JSON schemas.
+- [ ] The suggested design uses typed code stubs (e.g., Python or TypeScript function signatures), not JSON Schema.
 - [ ] The suggested design includes output filtering (e.g., pagination, field selection) to avoid context window explosion.
 - [ ] The suggested design supports batch execution (e.g., `start-instances --ids i-123 i-456`) to minimize round trips.
 - [ ] Error messages are designed to be actionable (e.g., "Invalid instance ID. Valid formats: i-[a-z0-9]{17}").

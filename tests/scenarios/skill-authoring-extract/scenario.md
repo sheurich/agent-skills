@@ -14,7 +14,7 @@ Review the provided `session-transcript.md` fixture and create a new reusable sk
 - [ ] The agent reads `extracting-from-sessions.md` to understand the extraction process.
 - [ ] The agent runs the quality assessment criteria defined in the reference doc on the transcript.
 - [ ] The agent asks the user for confirmation on the extracted skill's scope and name before writing files.
-- [ ] The skill is saved to a harness-appropriate path (e.g., `~/.agents/skills/` or a project `.pi/skills/` directory).
+- [ ] If the skill is saved, it goes to a harness-appropriate path (e.g., `~/.agents/skills/` or a project `.pi/skills/` directory).
 
 ## Baseline
 
@@ -61,8 +61,8 @@ Review the provided `session-transcript.md` fixture and create a new reusable sk
 | --- | --- | --- |
 | reads extracting-from-sessions.md | Pass | Successfully located and read `references/extracting-from-sessions.md`. |
 | runs quality assessment | Pass | Evaluated candidate against criteria (reusable, non-trivial, verified) and correctly identified it as a weak candidate (just a docs lookup). |
-| asks confirmation | Pass | Simulated asking the user, presenting the negative quality assessment, and recommended skipping extraction. Did not write the file. |
-| saves to harness-appropriate path | Pass | Identified `~/.agents/skills/legacy-api-basic-auth/SKILL.md` as the intended path if confirmed. |
+| asks confirmation | Pass | Presented the negative quality assessment and recommended skipping extraction. Did not write the file. |
+| saves to harness-appropriate path | N/A | Correctly recommended against saving. Identified `~/.agents/skills/legacy-api-basic-auth/SKILL.md` as the intended path if confirmed. |
 
 ## Analysis
 

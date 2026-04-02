@@ -22,8 +22,8 @@ Review and update the provided `outdated-skill.md` fixture to match current best
 | Criterion | Result | Observation |
 | --- | --- | --- |
 | reads skill-lifecycle.md | Pass/Fail | What happened |
-| adds deprecation notice | Pass/Fail | What happened |
-| updates description | Pass/Fail | What happened |
+| updates description or adds deprecation notice | Pass/Fail | What happened |
+| removes or replaces deprecated tool references | Pass/Fail | What happened |
 
 ### Run: 2026-04-02 (global.anthropic.claude-opus-4-6-v1)
 
@@ -44,8 +44,8 @@ Review and update the provided `outdated-skill.md` fixture to match current best
 | Criterion | Result | Observation |
 | --- | --- | --- |
 | reads skill-lifecycle.md | Pass/Fail | What happened |
-| adds deprecation notice | Pass/Fail | What happened |
-| updates description | Pass/Fail | What happened |
+| updates description or adds deprecation notice | Pass/Fail | What happened |
+| removes or replaces deprecated tool references | Pass/Fail | What happened |
 
 ### Run: 2026-04-02 (global.anthropic.claude-opus-4-6-v1)
 
