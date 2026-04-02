@@ -1,6 +1,6 @@
 ---
 name: skill-authoring
-description: Write and refine agent skills. Use when creating, editing, or reviewing skills, or when asking about SKILL.md format, frontmatter fields, progressive disclosure, or cross-agent distribution.
+description: Write and refine agent skills. Use when generating skills from docs, extracting from sessions, designing tool interfaces, managing lifecycle, or writing for dual-harness patterns.
 ---
 
 # Skill Authoring
