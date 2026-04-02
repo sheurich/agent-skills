@@ -175,6 +175,14 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_switch", async (_event, newCtx) => resetForSession(newCtx));
   pi.on("session_fork", async (_event, newCtx) => resetForSession(newCtx));
 
+  pi.on("session_shutdown", async (_event, shutdownCtx) => {
+    ctx = shutdownCtx;
+    if (queue.length > 0) {
+      drainNow();
+      await drainPromise;
+    }
+  });
+
   pi.on("agent_end", async (event) => {
     const delta = buildDelta(event.messages as Array<{ role?: string; content?: unknown }>);
     if (!delta.trim()) return;
