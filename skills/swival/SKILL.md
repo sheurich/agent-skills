@@ -21,14 +21,14 @@ Swival connects to LLM providers through a litellm proxy.
 Verify both are installed before proceeding:
 
 ```bash
-command -v swival       || echo "swival not found — see setup.md"
-command -v swival-proxy || echo "swival-proxy not found — see setup.md"
+command -v swival       >/dev/null 2>&1 || { echo "swival not found — see setup.md"; exit 1; }
+command -v swival-proxy >/dev/null 2>&1 || { echo "swival-proxy not found — see setup.md"; exit 1; }
 swival-proxy status     # check if running
 swival-proxy start      # start if not
 ```
 
 If `swival` or `swival-proxy` are not installed, see
-[setup.md](references/setup.md).
+[setup.md](./references/setup.md).
 
 ## Security Model
 
@@ -57,7 +57,7 @@ files from scratch.
 For stronger isolation, `--sandbox agentfs` re-execs Swival inside
 an [AgentFS](https://github.com/tursodatabase/agentfs) overlay.
 Changes go to a session overlay, not to disk, until you approve
-them. See [agentfs.md](references/agentfs.md) for install and usage.
+them. See [agentfs.md](./references/agentfs.md) for install and usage.
 
 ### Command whitelist
 

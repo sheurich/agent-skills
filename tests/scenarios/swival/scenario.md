@@ -33,7 +33,6 @@ you would run."
 | Uses `--self-review` | Fail | Edited the file directly instead of producing a swival command. Invented fake flags (`swival enhance --feature input-validation`). |
 | Uses `--encrypt-secrets` | Fail | Implemented AES encryption in the Go code instead of using swival's flag |
 | Uses `-q` flag | Fail | No swival invocation at all |
-| Reports output | N/A | Did the work itself |
 | Considers `--sandbox agentfs` | Fail | Not mentioned |
 
 ## With-Skill — Haiku
@@ -47,7 +46,6 @@ you would run."
 | Uses `--self-review` | Pass | Correct flag: `swival --self-review --encrypt-secrets "Add input validation to cmd/serve.go"` |
 | Uses `--encrypt-secrets` | Pass | Correct flag with accurate description |
 | Uses `-q` flag | Fail | Omitted `-q` from the primary command |
-| Reports output | N/A | Showed the command, did not execute it |
 | Considers `--sandbox agentfs` | Fail | Not mentioned |
 
 ## Baseline — Sonnet
@@ -61,7 +59,6 @@ you would run."
 | Uses `--self-review` | Pass | Correct flag (discovered via `swival --help`) |
 | Uses `--encrypt-secrets` | Pass | Correct flag |
 | Uses `-q` flag | Fail | Omitted `-q` |
-| Reports output | N/A | Showed the command, did not execute it |
 | Considers `--sandbox agentfs` | Fail | Not mentioned |
 
 ## With-Skill — Sonnet
@@ -75,7 +72,6 @@ you would run."
 | Uses `--self-review` | Pass | Correct flag with accurate description of review loop |
 | Uses `--encrypt-secrets` | Pass | Correct flag with format-preserving encryption explanation |
 | Uses `-q` flag | Pass | Included `-q` in the command |
-| Reports output | N/A | Showed the command, did not execute it |
 | Considers `--sandbox agentfs` | Pass | Offered `--sandbox agentfs` as an optional refinement |
 
 ## Analysis
@@ -94,9 +90,7 @@ Without the skill, Sonnet discovers correct flags via `swival --help`
 but omits `-q`, the proxy check, and `--sandbox agentfs`. With the
 skill, Sonnet passes 5 of 5 evaluable criteria (proxy check,
 `--self-review`, `--encrypt-secrets`, `-q`, and `--sandbox agentfs`)
-and proactively suggests custom `--review-prompt`. "Reports output"
-was not evaluable because both runs showed the command rather than
-executing it.
+and proactively suggests custom `--review-prompt`.
 
 ### Summary
 
