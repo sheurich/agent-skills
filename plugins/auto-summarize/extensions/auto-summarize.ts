@@ -110,15 +110,10 @@ function parseJson(text: string): SummaryData | null {
 
 /** Try known cheap models in preference order. */
 function findModel(ctx: ExtensionContext): Model<Api> | undefined {
-  // Prefer Bedrock ARN over direct Anthropic (custom inference profiles).
   const all = ctx.modelRegistry.getAll();
-  const bedrock = all.find((m) => m.id.includes("haiku-4-5") && m.id.startsWith("arn:"));
-  if (bedrock) return bedrock;
-
-  return (
-    ctx.modelRegistry.find("anthropic", "claude-haiku-4-5") ??
-    ctx.modelRegistry.find("openai", "gpt-5.4-mini")
-  );
+  const matches = all.filter((m) => m.id.includes("haiku-4-5"));
+  // Prefer ARN (custom inference profile) over built-in Bedrock/Anthropic IDs.
+  return matches.find((m) => m.id.startsWith("arn:")) ?? matches[0];
 }
 
 export default function (pi: ExtensionAPI) {
