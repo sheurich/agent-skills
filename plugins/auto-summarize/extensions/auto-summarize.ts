@@ -26,6 +26,7 @@ type SummaryEntry = CustomEntry<SummaryData>;
 const MAX_MESSAGE_CHARS = 4000;
 const MAX_DELTA_CHARS = 16000;
 const MAX_QUEUE_SIZE = 50;
+const MIN_DELTA_CHARS = 100;
 
 const truncate = (s: string, max: number): string =>
   s.length <= max ? s : s.slice(0, max - 12) + "\n[truncated]";
@@ -242,6 +243,9 @@ export default function (pi: ExtensionAPI) {
     // Consume queue only after confirming model + auth are available.
     const deltas = queue.splice(0);
     const combined = truncateTail(deltas.join("\n---\n"), MAX_DELTA_CHARS);
+
+    // Skip trivial turns that won't meaningfully change the summary.
+    if (combined.length < MIN_DELTA_CHARS) return;
 
     const prompt = `${SUMMARIZE_PROMPT}
 
