@@ -183,6 +183,16 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
+  pi.on("session_compact", async (event, compactCtx) => {
+    ctx = compactCtx;
+    const compaction = (event as { compactionEntry?: { summary?: string } }).compactionEntry;
+    const note = compaction?.summary
+      ? `[system: conversation compacted. Compaction summary: ${truncate(compaction.summary, 2000)}. Update your rolling summary — earlier turns are no longer in context.]`
+      : "[system: conversation compacted — earlier turns removed from context. Update summary to reflect only what remains relevant.]";
+    queue.push(note);
+    scheduleDrain();
+  });
+
   pi.on("agent_end", async (event) => {
     const delta = buildDelta(event.messages as Array<{ role?: string; content?: unknown }>);
     if (!delta.trim()) return;
