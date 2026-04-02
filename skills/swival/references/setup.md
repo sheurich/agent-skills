@@ -2,10 +2,20 @@
 
 Install Swival, configure the litellm proxy, and verify connectivity.
 
+## Prerequisites
+
+Swival and litellm are installed via `uv tool`. If `uv` is not
+available, substitute `pipx` or `pip install --user`.
+
+```bash
+command -v uv || { echo "uv not found — install from https://docs.astral.sh/uv/"; exit 1; }
+```
+
 ## Install Swival
 
 ```bash
 uv tool install swival
+# or: pipx install swival
 ```
 
 ## Install litellm proxy with provider extras
@@ -79,77 +89,28 @@ provider = "generic"
 model = "claude-opus-4-6"          # default model name from proxy
 base_url = "http://127.0.0.1:4000"
 api_key = "sk-unused"              # proxy requires a key but ignores it
-yolo = true                        # unrestricted filesystem access
+# yolo = true                      # opt-in: disable filesystem and command restrictions
 ```
 
 Swival has no native Bedrock or Vertex provider. The `generic`
 provider points at the litellm proxy, which translates to the
 real provider.
 
+By default, Swival restricts file access to the working directory
+and limits commands to a whitelist. Add `yolo = true` only for
+trusted local work where restrictions get in the way.
+
 ## Install proxy manager
 
-Write `~/.local/bin/swival-proxy`:
+Copy the script from this skill into your PATH:
 
 ```bash
-#!/bin/bash
-set -euo pipefail
-CONFIG="${HOME}/.config/litellm/config.yaml"
-PORT=4000
-PIDFILE="${HOME}/.config/litellm/proxy.pid"
-LOGFILE="${HOME}/.config/litellm/proxy.log"
-
-start() {
-    if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-        echo "litellm proxy already running (PID $(cat "$PIDFILE"))"
-        return 0
-    fi
-    echo "Starting litellm proxy on port ${PORT}..."
-    nohup litellm --config "$CONFIG" --port "$PORT" > "$LOGFILE" 2>&1 &
-    echo $! > "$PIDFILE"
-    sleep 2
-    if kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-        echo "litellm proxy started (PID $(cat "$PIDFILE"))"
-    else
-        echo "Failed to start. Check $LOGFILE" >&2
-        rm -f "$PIDFILE"
-        return 1
-    fi
-}
-
-stop() {
-    if [[ -f "$PIDFILE" ]]; then
-        local pid; pid=$(cat "$PIDFILE")
-        if kill -0 "$pid" 2>/dev/null; then
-            kill "$pid"; echo "Stopped (PID $pid)"
-        else
-            echo "Not running (stale PID file)"
-        fi
-        rm -f "$PIDFILE"
-    else
-        echo "Not running"
-    fi
-}
-
-status() {
-    if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-        echo "Running (PID $(cat "$PIDFILE"), port ${PORT})"
-    else
-        echo "Not running"; return 1
-    fi
-}
-
-case "${1:-status}" in
-    start)   start ;;
-    stop)    stop ;;
-    restart) stop; sleep 1; start ;;
-    status)  status ;;
-    *)       echo "Usage: swival-proxy start|stop|status|restart" >&2; exit 1 ;;
-esac
-```
-
-```bash
+cp skills/swival/scripts/swival-proxy ~/.local/bin/swival-proxy
 chmod +x ~/.local/bin/swival-proxy
 ```
+
+The script checks that `litellm` is installed and that the config
+file exists before starting the proxy.
 
 ## Verify
 
@@ -167,3 +128,5 @@ swival --model claude-haiku-4-5 -q "Say hello"
 | Connection refused on :4000 | Proxy not running | `swival-proxy start` |
 | "unknown provider" | Provider not in Swival's enum | Use `generic` provider with litellm proxy |
 | Vertex 404 "model not found" | Wrong project or API not enabled | Check `vertex_project` and enable Vertex AI API |
+| `litellm: command not found` | litellm not installed | `uv tool install 'litellm[proxy,bedrock]'` |
+| `uv: command not found` | uv not installed | See https://docs.astral.sh/uv/ or use `pipx` |

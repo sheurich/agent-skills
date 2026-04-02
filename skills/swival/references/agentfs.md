@@ -7,9 +7,15 @@ after the task completes.
 
 ## Install
 
+macOS:
+
 ```bash
 brew install tursodatabase/tap/agentfs
 ```
+
+Other platforms: see the
+[AgentFS releases](https://github.com/tursodatabase/agentfs/releases)
+page for prebuilt binaries and build instructions.
 
 ## Usage
 

@@ -18,13 +18,17 @@ delegate for tasks that benefit from these capabilities.
 ## Prerequisites
 
 Swival connects to LLM providers through a litellm proxy.
+Verify both are installed before proceeding:
 
 ```bash
-swival-proxy status   # check if running
-swival-proxy start    # start if not
+command -v swival       || echo "swival not found — see setup.md"
+command -v swival-proxy || echo "swival-proxy not found — see setup.md"
+swival-proxy status     # check if running
+swival-proxy start      # start if not
 ```
 
-If the proxy is not installed, see [setup.md](references/setup.md).
+If `swival` or `swival-proxy` are not installed, see
+[setup.md](references/setup.md).
 
 ## Security Model
 

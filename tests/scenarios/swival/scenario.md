@@ -92,14 +92,16 @@ Haiku still misses `-q` and the proxy check.
 
 Without the skill, Sonnet discovers correct flags via `swival --help`
 but omits `-q`, the proxy check, and `--sandbox agentfs`. With the
-skill, Sonnet hits all six criteria: proxy check, `--self-review`,
-`--encrypt-secrets`, `-q`, and proactively suggests `--sandbox agentfs`
-and custom `--review-prompt`. The skill adds proxy awareness and
-security-layering guidance that `--help` alone does not convey.
+skill, Sonnet passes 5 of 5 evaluable criteria (proxy check,
+`--self-review`, `--encrypt-secrets`, `-q`, and `--sandbox agentfs`)
+and proactively suggests custom `--review-prompt`. "Reports output"
+was not evaluable because both runs showed the command rather than
+executing it.
 
 ### Summary
 
 The skill provides the most value for less capable models (Haiku:
-0/6 → 2/6) and adds meaningful completeness for capable models
-(Sonnet: 2/6 → 6/6). The proxy status check and AgentFS suggestion
-are behaviors that no model exhibits without the skill.
+0/5 → 2/5 evaluable criteria) and adds meaningful completeness
+for capable models (Sonnet: 2/5 → 5/5). The proxy status check
+and AgentFS suggestion are behaviors that no model exhibits
+without the skill.
