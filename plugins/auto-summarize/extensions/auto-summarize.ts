@@ -108,12 +108,31 @@ function parseJson(text: string): SummaryData | null {
   }
 }
 
-/** Try known cheap models in preference order. */
+/**
+ * Cheap model candidates in preference order (substring matched against model ID).
+ * Haiku is ideal; GPT mini and Gemini Flash are comparable cost; Sonnet is a
+ * last resort for providers that lack cheaper options (e.g. Antigravity).
+ */
+const CHEAP_MODEL_CANDIDATES = [
+  "haiku-4-5",
+  "gpt-5-mini",
+  "gpt-4o-mini",
+  "gemini-3-flash",
+  "claude-sonnet-4-5",
+];
+
+/** Try known cheap models in preference order, picking the first with auth. */
 function findModel(ctx: ExtensionContext): Model<Api> | undefined {
   const all = ctx.modelRegistry.getAll();
-  const matches = all.filter((m) => m.id.includes("haiku-4-5"));
-  // Prefer ARN (custom inference profile) over built-in Bedrock/Anthropic IDs.
-  return matches.find((m) => m.id.startsWith("arn:")) ?? matches[0];
+
+  for (const substr of CHEAP_MODEL_CANDIDATES) {
+    const matches = all.filter((m) => m.id.includes(substr) && ctx.modelRegistry.hasConfiguredAuth(m));
+    if (matches.length === 0) continue;
+    // Prefer ARN (custom Bedrock inference profile) when available.
+    return matches.find((m) => m.id.startsWith("arn:")) ?? matches[0];
+  }
+
+  return undefined;
 }
 
 export default function (pi: ExtensionAPI) {
