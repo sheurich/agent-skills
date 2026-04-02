@@ -236,13 +236,19 @@ ${combined}`;
       const response = await complete(
         m,
         { messages: [{ role: "user" as const, content: [{ type: "text" as const, text: prompt }], timestamp: Date.now() }] },
-        { apiKey: auth.apiKey, headers: auth.headers },
+        { apiKey: auth.apiKey, headers: auth.headers, maxTokens: 1024 },
       );
 
       const text = response.content
         .filter((c): c is { type: "text"; text: string } => c.type === "text")
         .map((c) => c.text)
         .join("");
+
+      if (!text) {
+        const types = response.content.map((c: { type: string }) => c.type).join(", ") || "empty";
+        lastDrainError = `model returned no text (content types: ${types}; model: ${m.provider}/${m.id})`;
+        return;
+      }
 
       const parsed = parseJson(text);
       if (!parsed) {
