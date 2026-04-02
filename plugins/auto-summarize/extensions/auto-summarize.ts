@@ -215,10 +215,12 @@ export default function (pi: ExtensionAPI) {
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
     if (!auth.ok) {
       lastDrainError = `auth failed for ${m.provider}/${m.id}: ${(auth as { error?: string }).error ?? "unknown"}`;
+      model = undefined;
       return;
     }
     if (!auth.apiKey) {
       lastDrainError = `no API key for ${m.provider}/${m.id}`;
+      model = undefined;
       return;
     }
 
@@ -249,12 +251,14 @@ ${combined}`;
       if (!text) {
         const types = response.content.map((c: { type: string }) => c.type).join(", ") || "empty";
         lastDrainError = `model returned no text (content types: ${types}; model: ${m.provider}/${m.id})`;
+        model = undefined;
         return;
       }
 
       const parsed = parseJson(text);
       if (!parsed) {
         lastDrainError = `JSON parse failed: ${truncate(text, 200)}`;
+        model = undefined;
         return;
       }
 
@@ -268,6 +272,7 @@ ${combined}`;
       pi.appendEntry("auto-summary", { title, summary } satisfies SummaryData);
     } catch (e: unknown) {
       lastDrainError = e instanceof Error ? e.message : String(e);
+      model = undefined;
     }
   }
 
