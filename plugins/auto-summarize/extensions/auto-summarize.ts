@@ -160,6 +160,8 @@ export default function (pi: ExtensionAPI) {
     }
     queue.length = 0;
     drainPromise = Promise.resolve();
+    consecutiveFailures = 0;
+    lastDrainTimestamp = 0;
 
     ctx = newCtx;
     model = undefined;
@@ -207,7 +209,10 @@ export default function (pi: ExtensionAPI) {
 
   function scheduleDrain() {
     if (debounceTimer) clearTimeout(debounceTimer);
-    const cooldown = Math.max(0, MIN_DRAIN_INTERVAL_MS - (Date.now() - lastDrainTimestamp));
+    // First turn (no summary yet): drain immediately after debounce.
+    // Subsequent turns: enforce cooldown between drains.
+    const isFirstDrain = !summary;
+    const cooldown = isFirstDrain ? 0 : Math.max(0, MIN_DRAIN_INTERVAL_MS - (Date.now() - lastDrainTimestamp));
     const delay = Math.max(DEBOUNCE_MS, cooldown);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
@@ -250,7 +255,8 @@ export default function (pi: ExtensionAPI) {
     const combined = truncateTail(deltas.join("\n---\n"), MAX_DELTA_CHARS);
 
     // Skip trivial turns that won't meaningfully change the summary.
-    if (combined.length < MIN_DELTA_CHARS) return;
+    // Always process the first turn — even short prompts need a title.
+    if (summary && combined.length < MIN_DELTA_CHARS) return;
 
     const prompt = `${SUMMARIZE_PROMPT}
 
@@ -286,7 +292,7 @@ ${combined}`;
 
       consecutiveFailures = 0;
       lastDrainTimestamp = Date.now();
-      if (parsed.title) {
+      if (parsed.title && parsed.title !== title) {
         title = parsed.title;
         pi.setSessionName(title);
       }
