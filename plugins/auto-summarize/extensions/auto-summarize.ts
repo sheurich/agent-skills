@@ -146,6 +146,8 @@ export default function (pi: ExtensionAPI) {
   let drainPromise = Promise.resolve();
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let lastDrainError: string | null = null;
+  let consecutiveFailures = 0;
+  const MAX_RETRIES = 2;
 
   /** Reset all mutable state and restore summary from the new session's branch. */
   function resetForSession(newCtx: ExtensionContext) {
@@ -262,6 +264,7 @@ ${combined}`;
         return;
       }
 
+      consecutiveFailures = 0;
       if (parsed.title) {
         title = parsed.title;
         pi.setSessionName(title);
@@ -273,6 +276,13 @@ ${combined}`;
     } catch (e: unknown) {
       lastDrainError = e instanceof Error ? e.message : String(e);
       model = undefined;
+      // Restore deltas for retry on transient errors (API exceptions).
+      // Parse failures and empty responses are not retryable.
+      consecutiveFailures++;
+      if (consecutiveFailures <= MAX_RETRIES) {
+        queue.unshift(...deltas);
+        if (queue.length > MAX_QUEUE_SIZE) queue.splice(MAX_QUEUE_SIZE);
+      }
     }
   }
 
