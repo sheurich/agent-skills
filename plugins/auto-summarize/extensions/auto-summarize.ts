@@ -143,6 +143,7 @@ export default function (pi: ExtensionAPI) {
   const queue: string[] = [];
   let drainPromise = Promise.resolve();
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastDrainError: string | null = null;
 
   /** Reset all mutable state and restore summary from the new session's branch. */
   function resetForSession(newCtx: ExtensionContext) {
@@ -201,12 +202,23 @@ export default function (pi: ExtensionAPI) {
 
   async function drain() {
     if (!ctx || queue.length === 0) return;
+    lastDrainError = null;
 
     const m = model ?? (model = findModel(ctx));
-    if (!m) return;
+    if (!m) {
+      lastDrainError = "no cheap model found in registry";
+      return;
+    }
 
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
-    if (!auth.ok || !auth.apiKey) return;
+    if (!auth.ok) {
+      lastDrainError = `auth failed for ${m.provider}/${m.id}: ${(auth as { error?: string }).error ?? "unknown"}`;
+      return;
+    }
+    if (!auth.apiKey) {
+      lastDrainError = `no API key for ${m.provider}/${m.id}`;
+      return;
+    }
 
     // Consume queue only after confirming model + auth are available.
     const deltas = queue.splice(0);
@@ -233,7 +245,10 @@ ${combined}`;
         .join("");
 
       const parsed = parseJson(text);
-      if (!parsed) return;
+      if (!parsed) {
+        lastDrainError = `JSON parse failed: ${truncate(text, 200)}`;
+        return;
+      }
 
       if (parsed.title) {
         title = parsed.title;
@@ -243,8 +258,8 @@ ${combined}`;
         summary = parsed.summary;
       }
       pi.appendEntry("auto-summary", { title, summary } satisfies SummaryData);
-    } catch {
-      // Background task — never disrupt the session.
+    } catch (e: unknown) {
+      lastDrainError = e instanceof Error ? e.message : String(e);
     }
   }
 
@@ -278,7 +293,8 @@ ${combined}`;
       if (!title || !summary) {
         title = savedTitle;
         summary = savedSummary;
-        cmdCtx.ui.notify("Failed to generate name", "warning");
+        const detail = lastDrainError ? `: ${lastDrainError}` : "";
+        cmdCtx.ui.notify(`Failed to generate name${detail}`, "warning");
       } else {
         cmdCtx.ui.notify(`Session: ${title}`, "success");
       }
