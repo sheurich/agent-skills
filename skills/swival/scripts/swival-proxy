@@ -19,7 +19,7 @@ _pid_is_proxy() {
 require_prereqs() {
   if ! command -v litellm >/dev/null 2>&1; then
     echo "Error: litellm is not installed or not in PATH." >&2
-    echo "Install with: uv tool install 'litellm[proxy,bedrock]'" >&2
+    echo "Install with: uv tool install 'litellm[proxy,bedrock,google]'" >&2
     echo "Or: pip install 'litellm[proxy]'" >&2
     return 1
   fi
