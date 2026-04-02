@@ -6,7 +6,7 @@ The agent is provided with a transcript of a successful coding session where a n
 
 ## Task
 
-Review the provided `session-transcript.md` fixture and create a new reusable skill based on it. 
+Review the provided `session-transcript.md` fixture and create a new reusable skill based on it.
 (e.g., "Extract a skill from the attached session transcript that captures the workaround we found for the legacy API authentication error.")
 
 ## Criteria

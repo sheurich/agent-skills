@@ -6,7 +6,7 @@ The agent is working in a blank workspace and is asked to create a new agent ski
 
 ## Task
 
-Create a new skill using the provided documentation URLs as the source. 
+Create a new skill using the provided documentation URLs as the source.
 (e.g., "Create a skill for using the GitHub CLI based on https://cli.github.com/manual/ and https://docs.github.com/en/github-cli/github-cli/about-github-cli")
 
 ## Criteria

@@ -4,7 +4,7 @@ description: An old skill that edits files
 
 # File Editor
 
-This skill helps you edit files. 
+This skill helps you edit files.
 
 Use the `edit_file` tool to modify files on the filesystem. Wait for the tool to return before continuing.
 
