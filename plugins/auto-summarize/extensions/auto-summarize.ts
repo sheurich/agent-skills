@@ -27,6 +27,8 @@ const MAX_MESSAGE_CHARS = 4000;
 const MAX_DELTA_CHARS = 16000;
 const MAX_QUEUE_SIZE = 50;
 const MIN_DELTA_CHARS = 100;
+const DEBOUNCE_MS = 3_000;
+const MIN_DRAIN_INTERVAL_MS = 10_000;
 
 const truncate = (s: string, max: number): string =>
   s.length <= max ? s : s.slice(0, max - 12) + "\n[truncated]";
@@ -147,6 +149,7 @@ export default function (pi: ExtensionAPI) {
   let drainPromise = Promise.resolve();
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let consecutiveFailures = 0;
+  let lastDrainTimestamp = 0;
   const MAX_RETRIES = 2;
 
   /** Reset all mutable state and restore summary from the new session's branch. */
@@ -204,12 +207,14 @@ export default function (pi: ExtensionAPI) {
 
   function scheduleDrain() {
     if (debounceTimer) clearTimeout(debounceTimer);
+    const cooldown = Math.max(0, MIN_DRAIN_INTERVAL_MS - (Date.now() - lastDrainTimestamp));
+    const delay = Math.max(DEBOUNCE_MS, cooldown);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
       drainPromise = drainPromise
         .then(() => (queue.length > 0 ? drain() : undefined))
         .catch(() => {});
-    }, 3000);
+    }, delay);
   }
 
   function drainNow() {
@@ -280,6 +285,7 @@ ${combined}`;
       }
 
       consecutiveFailures = 0;
+      lastDrainTimestamp = Date.now();
       if (parsed.title) {
         title = parsed.title;
         pi.setSessionName(title);
