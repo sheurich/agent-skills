@@ -72,6 +72,22 @@ Evaluate the candidate skill against these criteria:
 Present assessment to user and ask: "Proceed with extraction? [yes/no]"
 Respect their judgment - if they say yes, extract; if no, skip.
 
+#### Example: Good Extraction Candidate
+
+> **Problem:** `RecursionError` when traversing an AST built from
+> untrusted serialized data.
+>
+> **Key insight:** The visitor pattern assumes acyclic trees, but
+> deserialized data can contain reference cycles. Adding a `seen`
+> set to the visitor is cheap and prevents infinite recursion.
+>
+> **Triggers:** RecursionError during tree traversal, visitor pattern
+> on untrusted input, deserializing nested structures.
+>
+> **Assessment:** Reusable ✔, Non-trivial ✔ (root cause wasn't
+> obvious from the stack trace), Verified ✔, Specific triggers ✔,
+> Explains WHY ✔ (acyclic assumption). Proceed.
+
 #### Quality Standards & Anti-Patterns
 
 Skills should provide guidance the agent doesn't already have.

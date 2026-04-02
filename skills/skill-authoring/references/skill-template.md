@@ -54,7 +54,7 @@ description: >-
 
 Before saving, verify:
 
-- [ ] Frontmatter strictly follows [format-spec.md](format-spec.md) (only `name` and `description` are allowed unless extending with custom harness keys).
+- [ ] Frontmatter uses only spec-defined fields (see [format-spec.md](format-spec.md) for the complete list) unless extending with harness-specific keys.
 - [ ] Name is kebab-case, max 64 characters
 - [ ] Description is third-person ("Fixes X" not "I help with X")
 - [ ] Description includes specific trigger conditions

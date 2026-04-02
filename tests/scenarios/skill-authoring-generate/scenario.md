@@ -68,7 +68,6 @@ Create a new skill using the provided documentation URLs as the source.
 
 Compare outcomes. State what the skill adds.
 
-
 ### Run: 2026-04-02 (global.anthropic.claude-opus-4-6-v1)
 
 The baseline agent falls back to generic skill knowledge, creating a basic single-file `SKILL.md` and ignoring the generator CLI workflow entirely.
@@ -76,4 +75,3 @@ The baseline agent falls back to generic skill knowledge, creating a basic singl
 With the skill loaded, the agent correctly navigates the progressive disclosure routing table, reads `generating-from-docs.md`, and attempts the defined CLI workflow. Even though the CLI tool was unavailable on the system, the agent adapted gracefully and still followed the architectural directives in `format-spec.md` to split heavy API schemas into the `references/` directory.
 
 The skill successfully standardizes the generation process and enforces the `references/` structural rule. The agent correctly evaluated tool availability, intelligently omitting the `.skillscontext` file after verifying the dependent `agent-skills-generator` tool was missing, fully satisfying the workflow attempt criteria.
-

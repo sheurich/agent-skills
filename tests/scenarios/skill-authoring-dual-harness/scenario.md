@@ -64,10 +64,8 @@ Create a skill that needs to evaluate a shell command to populate its context.
 
 Compare outcomes. State what the skill adds.
 
-
 ### Run: 2026-04-02 (global.anthropic.claude-opus-4-6-v1)
 
 **Baseline:** The agent uses standard markdown code blocks, which do not automatically evaluate to provide context. It lacks knowledge of the dual-harness execution environment or the specialized dynamic context syntax.
 
 **With-Skill:** The agent correctly references the formatting details for cross-platform execution (the `!` backtick syntax and `$ARGUMENTS` documentation) by adhering to the instructions provided. The resulting skill seamlessly evaluates dynamic context on platforms that support it while providing manual fallback steps for platforms that don't.
-

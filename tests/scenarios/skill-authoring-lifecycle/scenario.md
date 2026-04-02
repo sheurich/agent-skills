@@ -62,12 +62,10 @@ Review and update the provided `outdated-skill.md` fixture to match current best
 
 Compare outcomes. State what the skill adds.
 
-
 ### Run: 2026-04-02 (global.anthropic.claude-opus-4-6-v1)
 
 **Baseline:** The agent treats the outdated skill as something that must be fixed. It updates the tool references to match its current harness capabilities (`edit`, `read`, `write`), but fails to use proper frontmatter or understand skill lifecycle management.
 
-**With-Skill:** The skill successfully guided the agent to fix the frontmatter (adding a `name` field), format the description correctly (WHAT and WHEN), cut motivational filler, and append a changelog as required by `skill-lifecycle.md`. However, the skill failed to trigger a deprecation. The agent explicitly noted in its output: *"This skill is borderline for existence (file editing is standard agent practice), but since the task was to update rather than evaluate necessity, I preserved it with corrected content."* The skill's rule against creating skills for "standard practices" wasn't strong enough to override the direct command to "update" the skill. 
+**With-Skill:** The skill successfully guided the agent to fix the frontmatter (adding a `name` field), format the description correctly (WHAT and WHEN), cut motivational filler, and append a changelog as required by `skill-lifecycle.md`. However, the skill failed to trigger a deprecation. The agent explicitly noted in its output: *"This skill is borderline for existence (file editing is standard agent practice), but since the task was to update rather than evaluate necessity, I preserved it with corrected content."* The skill's rule against creating skills for "standard practices" wasn't strong enough to override the direct command to "update" the skill.
 
 To achieve the desired behavior (deprecating the skill instead of updating it), the `skill-lifecycle.md` reference may need stronger explicit guidance: e.g., "If asked to update a skill that covers standard practices, deprecate it instead."
-

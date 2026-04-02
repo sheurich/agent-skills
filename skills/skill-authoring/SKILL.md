@@ -16,8 +16,8 @@ Use the right reference file for your task:
 - [skill-lifecycle.md](references/skill-lifecycle.md) — Updating, deprecating, or archiving an existing skill.
 - [tool-design.md](references/tool-design.md) — Designing tool interfaces and APIs for agents.
 - [skill-template.md](references/skill-template.md) — Copy-paste template for new skills.
-- [format-spec.md](references/format-spec.md) — Frontmatter fields, directory patterns, and naming rules.
-- [platform-guide.md](references/platform-guide.md) — What each agent platform discovers, loads, and ignores.
+- [format-spec.md](references/format-spec.md) — Frontmatter fields, directory patterns, naming rules, external tool conventions, and content organization.
+- [platform-guide.md](references/platform-guide.md) — What each agent platform discovers, loads, and ignores, plus dual-harness compatibility patterns.
 
 *Note: Skill reference files must be resilient to context compaction. If an agent summarizes this routing table, ensure the distinct purpose of each file remains clear.*
 

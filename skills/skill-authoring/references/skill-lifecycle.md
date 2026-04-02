@@ -84,6 +84,14 @@ Archive a skill when:
    > Archived 2025-01-15: Python 2 is EOL, this is no longer relevant.
    ```
 
+## Review Cadence
+
+Review existing skills when:
+
+- A major version of the underlying tool or library ships
+- A skill triggers but doesn't help (the agent loads it and ignores it)
+- 6–12 months have passed since the last review
+
 ## Lifecycle Summary
 
 | Stage | Trigger | Action |

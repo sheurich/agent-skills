@@ -72,7 +72,6 @@ Design the command-line interface for a new tool that allows agents to list, sta
 
 Compare outcomes. State what the skill adds.
 
-
 ### Run: 2026-04-02 (global.anthropic.claude-opus-4-6-v1)
 
 **Baseline vs With-Skill:**
@@ -80,4 +79,3 @@ The baseline run managed to design a functional CLI tool that supported batch ex
 
 **What the skill adds:**
 The `skill-authoring` skill (specifically the `tool-design.md` reference) provides explicit, structured guidance on how to build agent-friendly tools. It ensures the agent applies specific patterns—such as using typed stubs over JSON schemas, implementing composable output filtering to prevent context window explosion, and designing actionable error messages. Without the skill, the model defaults to standard CLI design patterns (basic JSON output and generic errors) rather than optimizing the interface specifically for LLM consumption.
-
