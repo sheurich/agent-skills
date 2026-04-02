@@ -30,6 +30,7 @@ fi
 
 3. **Write .skillscontext:**
    One URL pattern per line. Prefix URLs with ! (exclamation mark) to exclude them.
+   Write this file even when using the manual fallback — it serves as provenance for the source URLs.
 
    ```text
    https://docs.example.com/guide/*
