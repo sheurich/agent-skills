@@ -19,7 +19,6 @@ you would run."
 - [ ] Agent invokes `swival` with `--self-review` flag
 - [ ] Agent includes `--encrypt-secrets` given the task mentions credentials
 - [ ] Agent uses `-q` flag for one-shot delegation (not --repl)
-- [ ] Agent reports swival's output back to the user
 - [ ] If task involves untrusted input, agent considers `--sandbox agentfs`
 
 ## Baseline — Haiku

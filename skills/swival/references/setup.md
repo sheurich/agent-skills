@@ -102,13 +102,15 @@ trusted local work where restrictions get in the way.
 
 ## Install proxy manager
 
-The script is at `scripts/swival-proxy` relative to this skill.
-Copy it into your PATH:
+Copy the script from this skill's `scripts/` directory into your PATH.
+If installed via a package manager, find the script relative to the
+skill location. From the repo root:
 
 ```bash
+cp "$(dirname "$0")/../scripts/swival-proxy" ~/.local/bin/swival-proxy
+# or, from the repo root:
+# cp skills/swival/scripts/swival-proxy ~/.local/bin/swival-proxy
 chmod +x ~/.local/bin/swival-proxy
-# Adjust the source path to where the skill is installed:
-cp /path/to/skills/swival/scripts/swival-proxy ~/.local/bin/swival-proxy
 ```
 
 The script checks that `litellm` is installed and that the config
