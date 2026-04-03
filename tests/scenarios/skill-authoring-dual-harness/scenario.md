@@ -12,7 +12,7 @@ Create a skill that needs to evaluate a shell command to populate its context.
 ## Criteria
 
 - [ ] The agent reads `platform-guide.md` to understand dual-harness compatibility patterns.
-- [ ] The skill uses the documented cross-harness dynamic context pattern: `` !`command` `` inline syntax with the fallback instruction before the dynamic context block ("If the fields below show commands rather than output, run each one first."). See platform-guide.md §1.
+- [ ] The skill uses the documented cross-harness dynamic context pattern: `` !`command` `` inline syntax with the fallback instruction before the dynamic context block ("If the fields below show commands rather than output, run each one first."). See platform-guide.md → Writing for Multiple Harnesses → `!` Backtick Fallback.
 - [ ] The skill handles the `$ARGUMENTS` variable portably by mentioning its dual location ("The argument is available as `$ARGUMENTS` or appears after this skill block.").
 
 ## Baseline
