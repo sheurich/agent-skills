@@ -5,11 +5,12 @@ Install Swival, configure the litellm proxy, and verify connectivity.
 ## Prerequisites
 
 Swival and litellm are installed via `uv tool`. If `uv` is not
-available, substitute `pipx` in the commands below.
+available, substitute `pipx` or `pip install --user` in the commands
+below.
 
 ```bash
-command -v uv >/dev/null 2>&1 || command -v pipx >/dev/null 2>&1 || {
-  echo "Neither uv nor pipx found. Install uv: https://docs.astral.sh/uv/"
+command -v uv >/dev/null 2>&1 || command -v pipx >/dev/null 2>&1 || command -v pip >/dev/null 2>&1 || {
+  echo "No Python package manager found. Install uv: https://docs.astral.sh/uv/"
   exit 1
 }
 ```
@@ -105,18 +106,17 @@ trusted local work where restrictions get in the way.
 
 ## Install proxy manager
 
-The script is at `../scripts/swival-proxy` relative to this file.
-Copy it into your PATH:
+The script is at `scripts/swival-proxy` under the skill root.
+From the repository root, copy it into your PATH:
 
 ```bash
 mkdir -p ~/.local/bin
-cd "$(dirname "$0")" 2>/dev/null  # if sourced from the skill directory
-cp ../scripts/swival-proxy ~/.local/bin/swival-proxy
+cp skills/swival/scripts/swival-proxy ~/.local/bin/swival-proxy
 chmod +x ~/.local/bin/swival-proxy
 ```
 
-If running interactively, `cd` into `skills/swival/references/` first,
-or substitute the full path to `scripts/swival-proxy`.
+If the skill is installed elsewhere, substitute the full path to
+`scripts/swival-proxy` in the `cp` command.
 
 The script checks that `litellm` is installed and that the config
 file exists before starting the proxy.
