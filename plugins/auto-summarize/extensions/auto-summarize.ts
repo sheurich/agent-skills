@@ -26,6 +26,9 @@ type SummaryEntry = CustomEntry<SummaryData>;
 const MAX_MESSAGE_CHARS = 4000;
 const MAX_DELTA_CHARS = 16000;
 const MAX_QUEUE_SIZE = 50;
+const MIN_DELTA_CHARS = 100;
+const DEBOUNCE_MS = 3_000;
+const MIN_DRAIN_INTERVAL_MS = 10_000;
 
 const truncate = (s: string, max: number): string =>
   s.length <= max ? s : s.slice(0, max - 12) + "\n[truncated]";
@@ -108,17 +111,33 @@ function parseJson(text: string): SummaryData | null {
   }
 }
 
-/** Try known cheap models in preference order. */
-function findModel(ctx: ExtensionContext): Model<Api> | undefined {
-  // Prefer Bedrock ARN over direct Anthropic (custom inference profiles).
-  const all = ctx.modelRegistry.getAll();
-  const bedrock = all.find((m) => m.id.includes("haiku-4-5") && m.id.startsWith("arn:"));
-  if (bedrock) return bedrock;
+/**
+ * Cheap model candidates in preference order (substring matched against model ID).
+ * Haiku is ideal; GPT mini and Gemini Flash are comparable cost; Sonnet is a
+ * last resort for providers that lack cheaper options (e.g. Antigravity).
+ */
+const CHEAP_MODEL_CANDIDATES = [
+  "haiku-4-5",
+  "gpt-5-mini",
+  "gpt-4o-mini",
+  "gemini-3-flash",
+  "claude-sonnet-4-5",
+];
 
-  return (
-    ctx.modelRegistry.find("anthropic", "claude-haiku-4-5") ??
-    ctx.modelRegistry.find("openai", "gpt-5.4-mini")
-  );
+/** Try known cheap models in preference order, picking the first with auth. */
+function findModel(ctx: ExtensionContext): Model<Api> | undefined {
+  const all = ctx.modelRegistry.getAll();
+
+  for (const substr of CHEAP_MODEL_CANDIDATES) {
+    const matches = all.filter((m) => m.id.includes(substr) && ctx.modelRegistry.hasConfiguredAuth(m));
+    if (matches.length === 0) continue;
+    // Prefer: ARN (custom inference profile) > global cross-region > first match.
+    return matches.find((m) => m.id.startsWith("arn:"))
+      ?? matches.find((m) => m.id.startsWith("global."))
+      ?? matches[0];
+  }
+
+  return undefined;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -129,6 +148,9 @@ export default function (pi: ExtensionAPI) {
   const queue: string[] = [];
   let drainPromise = Promise.resolve();
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let consecutiveFailures = 0;
+  let lastDrainTimestamp = 0;
+  const MAX_RETRIES = 2;
 
   /** Reset all mutable state and restore summary from the new session's branch. */
   function resetForSession(newCtx: ExtensionContext) {
@@ -138,6 +160,8 @@ export default function (pi: ExtensionAPI) {
     }
     queue.length = 0;
     drainPromise = Promise.resolve();
+    consecutiveFailures = 0;
+    lastDrainTimestamp = 0;
 
     ctx = newCtx;
     model = undefined;
@@ -157,6 +181,24 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_switch", async (_event, newCtx) => resetForSession(newCtx));
   pi.on("session_fork", async (_event, newCtx) => resetForSession(newCtx));
 
+  pi.on("session_shutdown", async (_event, shutdownCtx) => {
+    ctx = shutdownCtx;
+    if (queue.length > 0) {
+      drainNow();
+      await drainPromise;
+    }
+  });
+
+  pi.on("session_compact", async (event, compactCtx) => {
+    ctx = compactCtx;
+    const compaction = (event as { compactionEntry?: { summary?: string } }).compactionEntry;
+    const note = compaction?.summary
+      ? `[system: conversation compacted. Compaction summary: ${truncate(compaction.summary, 2000)}. Update your rolling summary — earlier turns are no longer in context.]`
+      : "[system: conversation compacted — earlier turns removed from context. Update summary to reflect only what remains relevant.]";
+    queue.push(note);
+    scheduleDrain();
+  });
+
   pi.on("agent_end", async (event) => {
     const delta = buildDelta(event.messages as Array<{ role?: string; content?: unknown }>);
     if (!delta.trim()) return;
@@ -167,12 +209,17 @@ export default function (pi: ExtensionAPI) {
 
   function scheduleDrain() {
     if (debounceTimer) clearTimeout(debounceTimer);
+    // First turn (no summary yet): drain immediately after debounce.
+    // Subsequent turns: enforce cooldown between drains.
+    const isFirstDrain = !summary;
+    const cooldown = isFirstDrain ? 0 : Math.max(0, MIN_DRAIN_INTERVAL_MS - (Date.now() - lastDrainTimestamp));
+    const delay = Math.max(DEBOUNCE_MS, cooldown);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
       drainPromise = drainPromise
         .then(() => (queue.length > 0 ? drain() : undefined))
         .catch(() => {});
-    }, 3000);
+    }, delay);
   }
 
   function drainNow() {
@@ -185,18 +232,31 @@ export default function (pi: ExtensionAPI) {
       .catch(() => {});
   }
 
-  async function drain() {
+  async function drain(): Promise<string | undefined> {
     if (!ctx || queue.length === 0) return;
 
     const m = model ?? (model = findModel(ctx));
-    if (!m) return;
+    if (!m) {
+      return "no cheap model found in registry";
+    }
 
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
-    if (!auth.ok || !auth.apiKey) return;
+    if (!auth.ok) {
+      model = undefined;
+      return `auth failed for ${m.provider}/${m.id}: ${(auth as { error?: string }).error ?? "unknown"}`;
+    }
+    if (!auth.apiKey) {
+      model = undefined;
+      return `no API key for ${m.provider}/${m.id}`;
+    }
 
     // Consume queue only after confirming model + auth are available.
     const deltas = queue.splice(0);
     const combined = truncateTail(deltas.join("\n---\n"), MAX_DELTA_CHARS);
+
+    // Skip trivial turns that won't meaningfully change the summary.
+    // Always process the first turn — even short prompts need a title.
+    if (summary && combined.length < MIN_DELTA_CHARS) return;
 
     const prompt = `${SUMMARIZE_PROMPT}
 
@@ -210,7 +270,7 @@ ${combined}`;
       const response = await complete(
         m,
         { messages: [{ role: "user" as const, content: [{ type: "text" as const, text: prompt }], timestamp: Date.now() }] },
-        { apiKey: auth.apiKey, headers: auth.headers },
+        { apiKey: auth.apiKey, headers: auth.headers, maxTokens: 1024 },
       );
 
       const text = response.content
@@ -218,10 +278,21 @@ ${combined}`;
         .map((c) => c.text)
         .join("");
 
-      const parsed = parseJson(text);
-      if (!parsed) return;
+      if (!text) {
+        const types = response.content.map((c: { type: string }) => c.type).join(", ") || "empty";
+        model = undefined;
+        return `model returned no text (content types: ${types}; model: ${m.provider}/${m.id})`;
+      }
 
-      if (parsed.title) {
+      const parsed = parseJson(text);
+      if (!parsed) {
+        model = undefined;
+        return `JSON parse failed: ${truncate(text, 200)}`;
+      }
+
+      consecutiveFailures = 0;
+      lastDrainTimestamp = Date.now();
+      if (parsed.title && parsed.title !== title) {
         title = parsed.title;
         pi.setSessionName(title);
       }
@@ -229,8 +300,16 @@ ${combined}`;
         summary = parsed.summary;
       }
       pi.appendEntry("auto-summary", { title, summary } satisfies SummaryData);
-    } catch {
-      // Background task — never disrupt the session.
+    } catch (e: unknown) {
+      model = undefined;
+      // Restore deltas for retry on transient errors (API exceptions).
+      // Parse failures and empty responses are not retryable.
+      consecutiveFailures++;
+      if (consecutiveFailures <= MAX_RETRIES) {
+        queue.unshift(...deltas);
+        if (queue.length > MAX_QUEUE_SIZE) queue.splice(MAX_QUEUE_SIZE);
+      }
+      return e instanceof Error ? e.message : String(e);
     }
   }
 
@@ -258,13 +337,15 @@ ${combined}`;
       queue.length = 0;
       queue.push(delta);
       cmdCtx.ui.notify("Updating session name...", "info");
-      drainNow();
+      if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
       await drainPromise;
+      const drainError = await drain();
 
       if (!title || !summary) {
         title = savedTitle;
         summary = savedSummary;
-        cmdCtx.ui.notify("Failed to generate name", "warning");
+        const detail = drainError ? `: ${drainError}` : "";
+        cmdCtx.ui.notify(`Failed to generate name${detail}`, "warning");
       } else {
         cmdCtx.ui.notify(`Session: ${title}`, "success");
       }

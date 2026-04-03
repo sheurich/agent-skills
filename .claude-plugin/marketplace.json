@@ -15,7 +15,8 @@
       "strict": false,
       "skills": [
         "./skills/readiness-review",
-        "./skills/skill-authoring"
+        "./skills/skill-authoring",
+        "./skills/swival"
       ]
     },
     {
