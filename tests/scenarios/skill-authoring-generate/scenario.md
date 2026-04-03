@@ -13,7 +13,7 @@ Create a new skill using the provided documentation URLs as the source.
 
 - [ ] The agent reads `generating-from-docs.md` to understand the generation process.
 - [ ] The agent uses the `agent-skills-generator` CLI (or instructs the user to do so) to fetch and convert the docs.
-- [ ] The agent writes a `.skillscontext` file containing the source URLs, or correctly skips this if the generator CLI is unavailable.
+- [ ] The agent writes a `.skillscontext` file containing the source URLs (required even for manual fallback — serves as provenance).
 - [ ] The generated skill applies the formatting rules defined in `format-spec.md`.
 
 ## Baseline
@@ -61,7 +61,7 @@ Create a new skill using the provided documentation URLs as the source.
 | --- | --- | --- |
 | reads generating-from-docs.md | Pass | Explicitly read `generating-from-docs.md` (and other reference files) via tool calls. |
 | uses agent-skills-generator | Pass | Attempted `command -v agent-skills-generator` and `brew install rodydavis/tap/agent-skills-generator`, falling back to manual `curl` when unavailable. |
-| handles .skillscontext | Pass | Verified `agent-skills-generator` was absent and correctly skipped writing `.skillscontext`, consistent with the conditional criterion. |
+| handles .skillscontext | Fail | Did not write `.skillscontext` despite the reference doc requiring it even for manual fallback (provenance). |
 | applies format-spec | Pass | Read `format-spec.md` and correctly extracted heavy API schemas into a `references/` directory (`query-parameters.md` and `response-types.md`). |
 
 ## Analysis
@@ -74,4 +74,4 @@ The baseline agent falls back to generic skill knowledge, creating a basic singl
 
 With the skill loaded, the agent correctly navigates the progressive disclosure routing table, reads `generating-from-docs.md`, and attempts the defined CLI workflow. Even though the CLI tool was unavailable on the system, the agent adapted gracefully and still followed the architectural directives in `format-spec.md` to split heavy API schemas into the `references/` directory.
 
-The skill successfully standardizes the generation process and enforces the `references/` structural rule. The agent correctly evaluated tool availability, intelligently omitting the `.skillscontext` file after verifying the dependent `agent-skills-generator` tool was missing, fully satisfying the workflow attempt criteria.
+The skill successfully standardizes the generation process and enforces the `references/` structural rule. The agent correctly evaluated tool availability but missed the requirement to write `.skillscontext` even when falling back to manual crawling (the file serves as URL provenance regardless of CLI availability).
