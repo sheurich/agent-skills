@@ -69,6 +69,7 @@ fi
 8. **Cleanup:**
 
    ```bash
+   cd ~
    rm -rf "$WORKDIR"
    ```
 

@@ -38,7 +38,7 @@ Design the command-line interface for a new tool that allows agents to list, sta
 | --- | --- | --- |
 | reads tool-design.md | Fail | Did not read any reference files due to baseline constraints. |
 | suggests typed stubs | Fail | Provided JSON examples but no typed stubs (e.g. no TypeScript signatures or Python function signatures for inputs/outputs). |
-| output filtering | Partial | Included basic state/tag filters but lacked pagination or field selection (e.g. no `--fields`). |
+| output filtering | Fail | Included basic state/tag filters but lacked pagination or field selection (e.g. no `--fields`). |
 | batch execution | Pass | Commands accept multiple instance IDs to minimize round trips. |
 | actionable errors | Fail | Error format included a basic message but lacked actionable hints or format suggestions. |
 

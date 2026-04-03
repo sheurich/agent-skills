@@ -12,6 +12,7 @@
       "./plugins/auto-summarize/extensions"
     ],
     "skills": [
+      "./skills/readiness-review",
       "./skills/skill-authoring"
     ]
   }
