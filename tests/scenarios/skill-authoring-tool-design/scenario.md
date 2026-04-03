@@ -37,7 +37,7 @@ Design the command-line interface for a new tool that allows agents to list, sta
 | Criterion | Result | Observation |
 | --- | --- | --- |
 | reads tool-design.md | Fail | Did not read any reference files due to baseline constraints. |
-| suggests typed stubs | Fail | Provided JSON examples but no typed stubs or schemas (e.g. no TypeScript signatures or JSON Schema for inputs/outputs). |
+| suggests typed stubs | Fail | Provided JSON examples but no typed stubs (e.g. no TypeScript signatures or Python function signatures for inputs/outputs). |
 | output filtering | Partial | Included basic state/tag filters but lacked pagination or field selection (e.g. no `--fields`). |
 | batch execution | Pass | Commands accept multiple instance IDs to minimize round trips. |
 | actionable errors | Fail | Error format included a basic message but lacked actionable hints or format suggestions. |
@@ -62,7 +62,7 @@ Design the command-line interface for a new tool that allows agents to list, sta
 
 | Criterion | Result | Observation |
 | --- | --- | --- |
-| reads tool-design.md | Pass | Explicitly read and applied the 5 design principles from `tool-design.md`. |
+| reads tool-design.md | Pass | Explicitly read and applied the design principles from `tool-design.md`. |
 | suggests typed stubs | Pass | Provided a complete TypeScript class and interfaces (`EC2`, `Instance`, `ActionError`) instead of flag tables or JSON schema. |
 | output filtering | Pass | Included composable filtering (`--fields`), compaction, `--raw`, and pagination (`--max-results`, `--next-token`). |
 | batch execution | Pass | Commands accept multiple IDs and handle partial failures with inline per-instance errors. |

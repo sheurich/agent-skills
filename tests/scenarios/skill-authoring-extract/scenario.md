@@ -61,7 +61,7 @@ Review the provided `session-transcript.md` fixture and create a new reusable sk
 | --- | --- | --- |
 | reads extracting-from-sessions.md | Pass | Successfully located and read `references/extracting-from-sessions.md`. |
 | runs quality assessment | Pass | Evaluated candidate against criteria (reusable, non-trivial, verified) and correctly identified it as a weak candidate (just a docs lookup). |
-| asks confirmation | Pass | Presented the negative quality assessment and recommended skipping extraction. Did not write the file. |
+| asks confirmation | N/A | Agent recommended against extraction based on quality assessment. Scope/name confirmation not applicable when saving is not recommended. |
 | saves to harness-appropriate path | N/A | Correctly recommended against saving. Identified `~/.agents/skills/legacy-api-basic-auth/SKILL.md` as the intended path if confirmed. |
 
 ## Analysis
