@@ -1,11 +1,25 @@
 ---
 name: skill-authoring
-description: Write and refine agent skills. Use when creating, editing, or reviewing skills, or when asking about SKILL.md format, frontmatter fields, progressive disclosure, or cross-agent distribution.
+description: Write and refine agent skills. Use when generating skills from docs, extracting from sessions, designing tool interfaces, managing lifecycle, or writing for dual-harness patterns.
 ---
 
 # Skill Authoring
 
 TDD for agent instructions. Test, write, shorten.
+
+## What Are You Doing?
+
+Use the right reference file for your task:
+
+- [extracting-from-sessions.md](references/extracting-from-sessions.md) — Saving knowledge from a work session into a new skill.
+- [generating-from-docs.md](references/generating-from-docs.md) — Creating a new skill by crawling documentation websites.
+- [skill-lifecycle.md](references/skill-lifecycle.md) — Updating, deprecating, or archiving an existing skill.
+- [tool-design.md](references/tool-design.md) — Designing tool interfaces and APIs for agents.
+- [skill-template.md](references/skill-template.md) — Copy-paste template for new skills.
+- [format-spec.md](references/format-spec.md) — Frontmatter fields, directory patterns, naming rules, external tool conventions, and content organization.
+- [platform-guide.md](references/platform-guide.md) — What each agent platform discovers, loads, and ignores, plus dual-harness compatibility patterns.
+
+*Note: Skill reference files must be resilient to context compaction. If an agent summarizes this routing table, ensure the distinct purpose of each file remains clear.*
 
 ## Decide Whether to Create
 
@@ -132,7 +146,4 @@ then restore the last cut.
 
 ## Reference
 
-- [format-spec.md](references/format-spec.md) — frontmatter fields,
-  directory patterns, naming rules, external tool conventions
-- [platform-guide.md](references/platform-guide.md) — what each
-  platform discovers, loads, and ignores
+- See the **What Are You Doing?** section above for all reference files.

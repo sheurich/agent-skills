@@ -1,10 +1,10 @@
 {
-  "name": "sheurich-agent-skills",
+  "name": "agent-skills",
   "owner": {
     "name": "Shiloh Heurich"
   },
   "metadata": {
-    "description": "Agent skills by Shiloh Heurich",
+    "description": "Cross-agent skills and Pi extensions",
     "version": "1.0.0"
   },
   "plugins": [

@@ -63,7 +63,7 @@ vary in support:
 | `license` | Ignored | Ignored | Ignored | Optional |
 | `compatibility` | Ignored | Ignored | Ignored | Optional |
 | `metadata` | Ignored | Ignored | Ignored | Optional |
-| `allowed-tools` | Enforced | Ignored | Experimental | Optional |
+| `allowed-tools` | Enforced | Ignored | Ignored (not wired to runtime) | Optional |
 | `user-invocable` | Enforced | Ignored | Ignored | CC-only |
 | `argument-hint` | Shown in autocomplete | Ignored | Ignored | CC-only |
 | `disable-model-invocation` | Enforced | Ignored | Enforced | CC-only |
@@ -85,7 +85,7 @@ Claude Code gets full tool access in Gemini and Pi.
 
 | Variable | Claude Code | Gemini CLI | Pi |
 |----------|-------------|------------|-----|
-| `$ARGUMENTS` | Invocation args | — | Appended as `User: <args>` |
+| `$ARGUMENTS` | Invocation args | — | Appended as `User: <args>` after block |
 | `${CLAUDE_SESSION_ID}` | Current session | — | — |
 | `${CLAUDE_PLUGIN_ROOT}` | Plugin directory | — | — |
 | `` !`command` `` | Shell substitution at load | — | — |
@@ -115,6 +115,36 @@ Claude Code gets full tool access in Gemini and Pi.
 - For multi-plugin repos, Gemini CLI users install individual plugins
   as separate extensions; Claude Code users install from the
   marketplace.
+
+## Writing for Multiple Harnesses
+
+When creating skills intended to run across Claude Code, Gemini CLI, and Pi, adopt these four patterns to ensure compatibility and correct behavior.
+
+### 1. `!` Backtick Fallback
+
+Claude Code evaluates `` !`command` `` substitutions when a skill loads. Other harnesses do not, treating the syntax as literal text. To make dynamic context work everywhere, prefix context blocks with an instruction that acts as a no-op when compiled but prompts the agent when raw:
+
+```markdown
+If the fields below show commands rather than output, run each one first.
+
+## Context
+- Current branch: !`git rev-parse --abbrev-ref HEAD`
+- Modified files: !`git status --porcelain`
+```
+
+### 2. Dual-Location `$ARGUMENTS`
+
+Claude Code substitutes `$ARGUMENTS` in the text. Pi appends arguments at the end of the skill block as `User: <args>`. Gemini CLI doesn't use the variable. To handle all three, phrase your argument instruction to account for both locations:
+
+> "The argument is available as `$ARGUMENTS` or appears after this skill block."
+
+### 3. `allowed-tools` as Documentation
+
+While `allowed-tools` restricts capabilities in Claude Code, it is ignored by Gemini CLI and Pi (where the agent retains its full native toolset). Treat `allowed-tools` as structural documentation of what the skill *should* do, rather than a hard sandbox boundary. Ensure your instructions explicitly tell the agent what tools to use.
+
+### 4. Compaction Resilience
+
+When an agent's context window fills up, older messages—including parts of the initial system prompt—are compacted or summarized. Critical rules placed casually in paragraph text may be lost. To ensure your skill's instructions survive context compaction, wrap them in labeled block elements (e.g., `<critical_rules>...</critical_rules>` or explicit markdown sections like `## CRITICAL RULES`).
 
 ## Installation
 
