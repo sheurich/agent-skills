@@ -5,11 +5,11 @@ Install Swival, configure the litellm proxy, and verify connectivity.
 ## Prerequisites
 
 Swival and litellm are installed via `uv tool`. If `uv` is not
-available, substitute `pipx` or `pip install --user` in the commands
-below.
+available, substitute `pipx` or `pip install --user` (or `pip3`) in
+the commands below.
 
 ```bash
-command -v uv >/dev/null 2>&1 || command -v pipx >/dev/null 2>&1 || command -v pip >/dev/null 2>&1 || {
+command -v uv >/dev/null 2>&1 || command -v pipx >/dev/null 2>&1 || command -v pip >/dev/null 2>&1 || command -v pip3 >/dev/null 2>&1 || {
   echo "No Python package manager found. Install uv: https://docs.astral.sh/uv/"
   exit 1
 }
@@ -66,7 +66,11 @@ Authentication uses the standard AWS credential chain
 
 ### Vertex AI (Google Cloud)
 
+Append under the existing `model_list:` key (or use as a standalone
+config):
+
 ```yaml
+model_list:
   - model_name: gemini-3.1-pro
     litellm_params:
       model: vertex_ai/gemini-3.1-pro-preview

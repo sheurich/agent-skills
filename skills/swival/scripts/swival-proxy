@@ -11,11 +11,18 @@ PIDFILE="${CONFIG_DIR}/proxy.pid"
 LOGFILE="${CONFIG_DIR}/proxy.log"
 
 _pid_is_proxy() {
-  # Verify PID is alive and its command line matches litellm proxy.
-  # This prevents signaling an unrelated process if the PID was reused.
+  # Verify PID is alive and its command line matches this specific
+  # litellm proxy instance (config path + port). Prevents signaling
+  # an unrelated process if the PID was reused.
   local pid="$1"
+  local args
+
   kill -0 "$pid" 2>/dev/null || return 1
-  ps -p "$pid" -o args= 2>/dev/null | grep -q "litellm.*--config" 2>/dev/null
+  args=$(ps -p "$pid" -o args= 2>/dev/null) || return 1
+
+  [[ "$args" == *"litellm"* ]] || return 1
+  [[ "$args" == *"--config $CONFIG"* ]] || return 1
+  [[ "$args" == *"--port $PORT"* ]]
 }
 
 require_prereqs() {
