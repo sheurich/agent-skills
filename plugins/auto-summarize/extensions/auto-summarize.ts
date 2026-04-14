@@ -25,6 +25,7 @@ type SummaryEntry = CustomEntry<SummaryData>;
 
 const MAX_MESSAGE_CHARS = 4000;
 const MAX_DELTA_CHARS = 16000;
+const MAX_CONTEXT_CHARS = 8000;
 const MAX_QUEUE_SIZE = 50;
 const MIN_DELTA_CHARS = 100;
 const DEBOUNCE_MS = 3_000;
@@ -38,7 +39,7 @@ const truncateTail = (s: string, max: number): string =>
 
 const SUMMARIZE_PROMPT = `\
 You maintain a rolling summary of a coding agent session.
-Given the current summary and the latest turn, produce an updated summary and a short title.
+Given the current state and the latest turn, produce an updated summary and a short title.
 
 Rules:
 - The summary captures goals, key decisions, progress, and next steps.
@@ -46,6 +47,8 @@ Rules:
 - The title is ≤72 characters, lowercase, format: \`topic: what happened\`.
 - If the session just started, derive both from the turn alone.
 - Drop stale information that has been superseded.
+- If a current title is provided, keep it unless the session's focus has genuinely shifted. Do not rename for sub-tasks or tangents.
+- Use recent conversation context (when provided) to understand the session's trajectory beyond the compressed summary.
 
 Respond with ONLY a JSON object (no markdown fences):
 {"title": "...", "summary": "..."}`;
@@ -75,7 +78,7 @@ function extractToolCalls(content: unknown): string[] {
   return calls;
 }
 
-function buildDelta(messages: Array<{ role?: string; content?: unknown }>): string {
+function buildDelta(messages: Array<{ role?: string; content?: unknown }>, maxChars = MAX_DELTA_CHARS): string {
   const parts: string[] = [];
   for (const msg of messages) {
     if (!msg.role) continue;
@@ -89,7 +92,37 @@ function buildDelta(messages: Array<{ role?: string; content?: unknown }>): stri
       if (tools.length > 0) parts.push(tools.join("\n"));
     }
   }
-  return truncateTail(parts.join("\n\n"), MAX_DELTA_CHARS);
+  return truncateTail(parts.join("\n\n"), maxChars);
+}
+
+/**
+ * Extract recent messages from the session branch, walking backward
+ * until a character budget is exhausted. Returns messages in
+ * chronological order.
+ */
+function getRecentMessages(
+  sessionCtx: ExtensionContext,
+  budget: number,
+): Array<{ role?: string; content?: unknown }> {
+  const entries = sessionCtx.sessionManager.getBranch();
+  const messages: Array<{ role?: string; content?: unknown }> = [];
+  let chars = 0;
+
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry.type !== "message" || !("message" in entry)) continue;
+    const msg = (entry as { message: { role?: string; content?: unknown } }).message;
+    if (!msg.role) continue;
+
+    const textLen = extractText(msg.content).length;
+    const msgChars = Math.min(textLen, MAX_MESSAGE_CHARS) + 20;
+    if (chars + msgChars > budget && messages.length > 0) break;
+
+    messages.unshift(msg);
+    chars += msgChars;
+  }
+
+  return messages;
 }
 
 function parseJson(text: string): SummaryData | null {
@@ -258,13 +291,30 @@ export default function (pi: ExtensionAPI) {
     // Always process the first turn — even short prompts need a title.
     if (summary && combined.length < MIN_DELTA_CHARS) return;
 
-    const prompt = `${SUMMARIZE_PROMPT}
+    // Build prompt sections. Incremental updates include recent branch
+    // context so the model sees raw conversation beyond the compressed
+    // summary, closing the quality gap with /autoname.
+    const sections: string[] = [SUMMARIZE_PROMPT];
 
-## Current summary
-${summary || "(new session — no summary yet)"}
+    if (title) {
+      sections.push(`## Current title\n${title}`);
+    }
 
-## ${deltas.length > 1 ? `Latest turns (${deltas.length} combined)` : "Latest turn"}
-${combined}`;
+    sections.push(`## Current summary\n${summary || "(new session — no summary yet)"}`);
+
+    if (summary && ctx) {
+      const recentMsgs = getRecentMessages(ctx, MAX_CONTEXT_CHARS);
+      if (recentMsgs.length > 0) {
+        const recentContext = buildDelta(recentMsgs, MAX_CONTEXT_CHARS);
+        if (recentContext.trim()) {
+          sections.push(`## Recent conversation context\n${recentContext}`);
+        }
+      }
+    }
+
+    sections.push(`## ${deltas.length > 1 ? `Latest turns (${deltas.length} combined)` : "Latest turn"}\n${combined}`);
+
+    const prompt = sections.join("\n\n");
 
     try {
       const response = await complete(
