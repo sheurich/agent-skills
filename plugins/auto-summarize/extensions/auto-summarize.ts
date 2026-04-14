@@ -116,6 +116,7 @@ function getRecentMessages(
     if (!msg.role) continue;
 
     const textLen = extractText(msg.content).length;
+    // +20 accounts for the "User: "/"Assistant: " prefix and separators that buildDelta adds
     const msgChars = Math.min(textLen, MAX_MESSAGE_CHARS) + 20;
     if (chars + msgChars > budget && messages.length > 0) break;
 
@@ -211,9 +212,9 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  // session_start fires for all lifecycle transitions including switches
+  // (reason: "resume") and forks (reason: "fork"), so one handler suffices.
   pi.on("session_start", async (_event, newCtx) => resetForSession(newCtx));
-  pi.on("session_switch", async (_event, newCtx) => resetForSession(newCtx));
-  pi.on("session_fork", async (_event, newCtx) => resetForSession(newCtx));
 
   pi.on("session_shutdown", async (_event, shutdownCtx) => {
     ctx = shutdownCtx;
@@ -304,6 +305,10 @@ export default function (pi: ExtensionAPI) {
     sections.push(`## Current summary\n${summary || "(new session — no summary yet)"}`);
 
     if (summary && ctx) {
+      // Recent context may partially overlap with the latest-turn delta
+      // (the branch already contains persisted messages by the time drain
+      // runs). The redundancy is acceptable — budget headroom is ample and
+      // the model handles duplicate content gracefully.
       const recentMsgs = getRecentMessages(ctx, MAX_CONTEXT_CHARS);
       if (recentMsgs.length > 0) {
         const recentContext = buildDelta(recentMsgs, MAX_CONTEXT_CHARS);
