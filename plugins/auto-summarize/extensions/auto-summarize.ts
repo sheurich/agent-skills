@@ -375,7 +375,7 @@ export default function (pi: ExtensionAPI) {
         )
         .map((e) => e.message);
 
-      const delta = buildDelta(messages);
+      const delta = buildDelta(messages, MAX_DELTA_CHARS + MAX_CONTEXT_CHARS);
       if (!delta.trim()) {
         cmdCtx.ui.notify("No conversation to summarize", "warning");
         return;
