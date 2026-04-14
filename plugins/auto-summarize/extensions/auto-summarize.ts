@@ -47,7 +47,8 @@ Rules:
 - The title is ≤72 characters, lowercase, format: \`topic: what happened\`.
 - If the session just started, derive both from the turn alone.
 - Drop stale information that has been superseded.
-- If a current title is provided, keep it unless the session's focus has genuinely shifted. Do not rename for sub-tasks or tangents.
+- The title captures the session's cumulative scope — what it is about overall. Do NOT replace the title with only the latest change; broaden it if the scope grew, but keep it holistic.
+- If a current title is provided, prefer keeping or expanding it. Only rewrite it when the session's overall topic has changed.
 - Use recent conversation context (when provided) to understand the session's trajectory beyond the compressed summary.
 
 Respond with ONLY a JSON object (no markdown fences):
