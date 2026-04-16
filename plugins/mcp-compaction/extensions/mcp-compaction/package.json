@@ -1,0 +1,11 @@
+{
+	"name": "mcp-compaction",
+	"private": true,
+	"type": "module",
+	"pi": {
+		"extensions": ["./index.ts"]
+	},
+	"scripts": {
+		"test": "node --experimental-strip-types --test compress.test.ts"
+	}
+}
