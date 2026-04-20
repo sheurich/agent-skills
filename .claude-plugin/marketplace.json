@@ -16,6 +16,7 @@
       "skills": [
         "./skills/readiness-review",
         "./skills/skill-authoring",
+        "./skills/semgrep-scan",
         "./skills/swival"
       ]
     },
