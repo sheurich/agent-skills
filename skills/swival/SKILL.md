@@ -3,7 +3,7 @@ name: swival
 description: >-
   Delegate tasks to Swival for self-reviewed code changes, sandboxed
   execution, secret-safe operations, cached analysis, local-model
-  inference, and A2A agent serving or clientele. Use when a task
+  inference, and A2A agent serving or client usage. Use when a task
   benefits from automated review loops against acceptance criteria,
   filesystem sandboxing, credential encryption, LLM response
   caching, or orchestrating a network of A2A agents.
@@ -27,14 +27,19 @@ Swival talks to most providers directly. The litellm proxy is
 only needed for Vertex AI and for Bedrock cross-region inference
 profiles that the native `bedrock` provider doesn't handle.
 
+Direct provider (no proxy) — verify `swival` only:
+
 ```bash
 command -v swival >/dev/null 2>&1 || { echo "swival not found — see setup.md"; exit 1; }
+```
 
-# Only when routing through litellm (Vertex / cross-region Bedrock):
-if [ "$SWIVAL_NEEDS_PROXY" = 1 ]; then
-  command -v swival-proxy >/dev/null 2>&1 || { echo "swival-proxy not found — see setup.md"; exit 1; }
-  swival-proxy status || swival-proxy start
-fi
+Routing through litellm (Vertex / cross-region Bedrock) — also
+verify and start `swival-proxy`:
+
+```bash
+command -v swival       >/dev/null 2>&1 || { echo "swival not found — see setup.md"; exit 1; }
+command -v swival-proxy >/dev/null 2>&1 || { echo "swival-proxy not found — see setup.md"; exit 1; }
+swival-proxy status || swival-proxy start
 ```
 
 If `swival` or `swival-proxy` are not installed, see
@@ -203,17 +208,23 @@ swival --self-review --objective task.md --verify criteria.md
 | Lifecycle hooks | `--lifecycle-command CMD` | `swival --lifecycle-command ./scripts/sync -q "..."` |
 | Command middleware | `--command-middleware CMD` | `swival --command-middleware ./scripts/gate.py -q "..."` |
 
-**Lifecycle hooks** run at startup and exit as `<cmd> startup|exit
-<base_dir>` with `SWIVAL_*` env vars for Git and project metadata.
+**Lifecycle hooks** run at startup and exit as `<cmd> startup|exit <base_dir>` with `SWIVAL_*` env vars for Git and project metadata.
 Default is fail-open; add `--lifecycle-fail-closed` to abort on
 hook failure. Useful for syncing memory/AGENTS.md across machines
 without committing them.
 
 **Command middleware** runs before each `run_command` /
 `run_shell_command` call. It receives JSON on stdin and replies
-with `{"action": "allow"}`, `{"action": "allow", "mode": ...,
-"command": ...}` to rewrite, or `{"action": "deny", "reason": ...}`
-to block.
+with one of:
+
+```json
+{"action": "allow"}
+{"action": "allow", "mode": "...", "command": "..."}
+{"action": "deny", "reason": "..."}
+```
+
+The second form rewrites the command before execution; the third
+blocks it.
 
 **A2A client config** (`--a2a-config`) points to a TOML file with
 `[a2a_servers.*]` tables and lets Swival dispatch subtasks to

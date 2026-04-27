@@ -7,6 +7,8 @@ across runs that reuse the same session ID.
 
 ## Install
 
+Quick install (upstream one-liner):
+
 ```bash
 curl -fsSL https://agentfs.ai/install | bash
 ```
@@ -15,6 +17,38 @@ The installer downloads a prebuilt binary from the latest GitHub
 release. It works on macOS (x86_64, arm64) and Linux (x86_64,
 aarch64). No Homebrew formula exists as of v0.6.4 — only the Turso
 `turso` CLI ships via their Homebrew tap.
+
+### Safer install (pinned + checksum-verified)
+
+Piping a remote script into `bash` leaves you exposed to the
+upstream host being compromised or to a MITM swapping the payload.
+If that's a concern, download a pinned release and verify against
+the published `sha256.sum` first. Pick your platform triple and
+version:
+
+```bash
+VERSION=v0.6.4
+TRIPLE=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
+BASE=https://github.com/tursodatabase/agentfs/releases/download/$VERSION
+
+curl -fsSLO "$BASE/agentfs-$TRIPLE.tar.xz"
+curl -fsSLO "$BASE/sha256.sum"
+grep " agentfs-$TRIPLE.tar.xz\$" sha256.sum | shasum -a 256 -c -
+
+tar -xJf "agentfs-$TRIPLE.tar.xz"
+install -m 0755 "agentfs-$TRIPLE/agentfs" ~/.local/bin/agentfs
+```
+
+Inspect `agentfs-installer.sh` before running it if you prefer the
+scripted flow but want to audit what it does:
+
+```bash
+curl -fsSL https://agentfs.ai/install -o agentfs-installer.sh
+less agentfs-installer.sh
+sh agentfs-installer.sh
+```
+
+### Platform notes
 
 On Linux the `agentfs run` overlay requires FUSE and user
 namespaces. macOS uses NFS + Apple Sandbox with no additional
