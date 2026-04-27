@@ -2,40 +2,50 @@
 
 OS-enforced filesystem isolation via
 [AgentFS](https://github.com/tursodatabase/agentfs). File writes go
-to a session overlay instead of disk. Review and apply or discard
-after the task completes.
+to a session overlay stored in a SQLite database. Changes persist
+across runs that reuse the same session ID.
 
 ## Install
 
-macOS:
-
 ```bash
-brew install tursodatabase/tap/agentfs
+curl -fsSL https://agentfs.ai/install | bash
 ```
 
-Other platforms: see the
-[AgentFS releases](https://github.com/tursodatabase/agentfs/releases)
-page for prebuilt binaries and build instructions.
+The installer downloads a prebuilt binary from the latest GitHub
+release. It works on macOS (x86_64, arm64) and Linux (x86_64,
+aarch64). No Homebrew formula exists as of v0.6.4 — only the Turso
+`turso` CLI ships via their Homebrew tap.
+
+On Linux the `agentfs run` overlay requires FUSE and user
+namespaces. macOS uses NFS + Apple Sandbox with no additional
+dependencies.
 
 ## Usage
 
 ```bash
-# Run sandboxed — changes go to overlay, not disk
+# Run sandboxed — writes go to an overlay database, not to disk
 swival --sandbox agentfs -q "Refactor the auth module"
 
-# Review what changed
-agentfs diff swival-<hash>
-
-# Apply or discard
-agentfs apply swival-<hash>   # commit changes to disk
-agentfs reset swival-<hash>   # discard all changes
+# Inspect overlay changes
+agentfs diff <session-id>
 ```
+
+There is no `agentfs apply` or `agentfs reset` command. The overlay
+lives in `.agentfs/<session-id>.db`:
+
+- **Keep changes for next run:** reuse the same session ID.
+- **Discard changes:** delete `.agentfs/<session-id>.db`, or start
+  a new session with a different ID.
+- **Pull files out:** use `agentfs fs <session-id> cat <path>` or
+  mount with `agentfs mount <session-id> <mount-point>` and copy.
+
+The overlay does not automatically merge back into the real
+filesystem.
 
 ## Session IDs
 
 Swival auto-generates a deterministic session ID from the project
-directory (`swival-<sha256-prefix>`). Re-running in the same
-directory reuses the overlay.
+directory. Re-running in the same directory reuses the overlay.
 
 Override with `--sandbox-session <id>` to name sessions explicitly
 or run multiple independent sessions in the same project.
@@ -55,13 +65,12 @@ as well. Requires a version of AgentFS with strict read support
 2. It re-execs itself via `agentfs run --allow <base-dir> -- swival ...`.
 3. AgentFS interposes filesystem calls at the OS level. Writes go to
    the overlay; reads see the overlay merged with the real filesystem.
-4. After the session, `agentfs diff` shows changes and `agentfs apply`
-   commits them.
+4. After the session, `agentfs diff` shows changes against the base.
 
 ## Combining with other security features
 
 ```bash
-# Full defense in depth: OS sandbox + self-review + secret encryption
+# OS sandbox + self-review + secret encryption
 swival --sandbox agentfs --self-review --encrypt-secrets \
   -q "Rotate credentials in config/"
 

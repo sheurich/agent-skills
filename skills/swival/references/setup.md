@@ -100,13 +100,21 @@ api_key = "sk-unused"              # proxy requires a key but ignores it
 # yolo = true                      # opt-in: disable filesystem and command restrictions
 ```
 
-Swival has no native Bedrock or Vertex provider. The `generic`
-provider points at the litellm proxy, which translates to the
-real provider.
+Swival has a native `bedrock` provider (see `swival --help`),
+but it has quirks (region passed via `--base-url`, limited model
+coverage). The litellm proxy handles cross-region inference
+profiles more cleanly. Swival has no native Vertex AI provider,
+so Vertex must go through the proxy.
 
-By default, Swival restricts file access to the working directory
-and limits commands to a whitelist. Add `yolo = true` only for
-trusted local work where restrictions get in the way.
+The `generic` provider points Swival at the litellm proxy, which
+translates to the real provider.
+
+By default, Swival restricts file access to the base directory
+(auto-detected project root, or the current directory). Command
+execution defaults to unrestricted (`--commands all`). Add
+`yolo = true` only if you also want to lift the file-access
+restriction; otherwise leave it commented out and scope access
+with `--add-dir` / `--add-dir-ro` as needed.
 
 ## Install proxy manager
 

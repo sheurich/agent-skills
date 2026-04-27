@@ -37,16 +37,19 @@ LLM content. Choose the right combination for the task.
 
 ### Filesystem sandbox
 
-By default, file tools are restricted to the base directory (CWD).
-`--yolo` disables all restrictions.
+By default (`--files some`), file tools are restricted to the base
+directory — the auto-detected project root, or the current
+directory if no project root is found. Change it with `--base-dir`.
 
 | Flag | Effect |
 |------|--------|
-| (default) | Reads and writes confined to CWD |
-| `--add-dir <path>` | Grant read+write to an extra directory |
-| `--add-dir-ro <path>` | Grant read-only to an extra directory |
+| (default, `--files some`) | Reads and writes confined to the base directory |
+| `--files all` | Unrestricted filesystem access |
+| `--files none` | Only `.swival/` is accessible |
+| `--add-dir <path>` | Grant read+write to an extra directory (repeatable) |
+| `--add-dir-ro <path>` | Grant read-only to an extra directory (repeatable) |
 | `--base-dir <path>` | Change the base directory |
-| `--yolo` | Disable all filesystem and command restrictions |
+| `--yolo` | Shorthand for `--files all --commands all` |
 
 The read-before-write guard prevents overwriting files the agent
 hasn't read. Disable with `--no-read-guard` if the agent creates
@@ -56,21 +59,32 @@ files from scratch.
 
 For stronger isolation, `--sandbox agentfs` re-execs Swival inside
 an [AgentFS](https://github.com/tursodatabase/agentfs) overlay.
-Changes go to a session overlay, not to disk, until you approve
-them. See [agentfs.md](./references/agentfs.md) for install and usage.
+Writes go to a per-session SQLite-backed overlay instead of the real
+filesystem. Inspect changes with `agentfs diff <session-id>`; there
+is no built-in merge-back command, so persist changes by reusing the
+session ID or copy files out manually. See
+[agentfs.md](./references/agentfs.md) for install and usage.
 
-### Command whitelist
+### Command access
 
-Without `--yolo`, only commands listed in `allowed_commands` can run.
-The default set is in `config.toml`:
+The `--commands` flag controls shell and command execution:
+
+| Mode | Effect |
+|------|--------|
+| `all` (default) | Unrestricted; shell wrappers (`bash -c`, `sh -c`, `python3 -c`) permitted |
+| `none` | Command execution disabled |
+| `ask` | Prompt for approval on each command bucket |
+| `ls,git,python3` | Comma-separated basename allowlist |
+
+In any mode other than `all`, shell wrappers and shell syntax
+(`&&`, `|`, `>`) are blocked — one command at a time.
+
+Set a persistent allowlist in `config.toml`:
 
 ```toml
 allowed_commands = ["ls", "git", "cat", "head", "tail", "find",
   "rg", "grep", "make", "uv", "curl", "diff", "patch", "python3"]
 ```
-
-Commands are resolved to absolute paths at startup. Shell syntax
-(`&&`, `|`, `>`) is blocked — one command at a time.
 
 ### Secret encryption (`--encrypt-secrets`)
 
@@ -190,7 +204,13 @@ Proxy manager: `swival-proxy start|stop|status|restart`
 
 ## Limitations
 
-- No native Bedrock/Vertex provider — requires the litellm proxy.
+- Native `bedrock` provider exists but has quirks (region in
+  `--base-url`, limited model coverage); the litellm proxy is
+  recommended for Bedrock cross-region inference profiles.
+- No native Vertex AI provider — requires the litellm proxy. The
+  native `google` provider targets the public Gemini API, not Vertex.
 - No rich TUI — output is plain terminal text.
 - No extension/package ecosystem.
-- AgentFS requires separate installation (`brew install tursodatabase/tap/agentfs`).
+- AgentFS requires separate installation via the upstream installer
+  (`curl -fsSL https://agentfs.ai/install | bash`). No Homebrew
+  formula exists.
