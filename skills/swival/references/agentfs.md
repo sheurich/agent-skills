@@ -33,9 +33,18 @@ BASE=https://github.com/tursodatabase/agentfs/releases/download/$VERSION
 
 curl -fsSLO "$BASE/agentfs-$TRIPLE.tar.xz"
 curl -fsSLO "$BASE/sha256.sum"
-grep " agentfs-$TRIPLE.tar.xz\$" sha256.sum | shasum -a 256 -c -
+
+if command -v sha256sum >/dev/null 2>&1; then
+  grep " agentfs-$TRIPLE.tar.xz\$" sha256.sum | sha256sum -c -
+elif command -v shasum >/dev/null 2>&1; then
+  grep " agentfs-$TRIPLE.tar.xz\$" sha256.sum | shasum -a 256 -c -
+else
+  echo "Need sha256sum or shasum to verify checksum" >&2
+  exit 1
+fi
 
 tar -xJf "agentfs-$TRIPLE.tar.xz"
+mkdir -p ~/.local/bin
 install -m 0755 "agentfs-$TRIPLE/agentfs" ~/.local/bin/agentfs
 ```
 
@@ -64,14 +73,28 @@ swival --sandbox agentfs -q "Refactor the auth module"
 agentfs diff <session-id>
 ```
 
-There is no `agentfs apply` or `agentfs reset` command. The overlay
-lives in `.agentfs/<session-id>.db`:
+There is no `agentfs apply` or `agentfs reset` command. Each
+`agentfs run --session <id>` stores its overlay under
+`~/.agentfs/run/<id>/`:
 
-- **Keep changes for next run:** reuse the same session ID.
-- **Discard changes:** delete `.agentfs/<session-id>.db`, or start
-  a new session with a different ID.
-- **Pull files out:** use `agentfs fs <session-id> cat <path>` or
-  mount with `agentfs mount <session-id> <mount-point>` and copy.
+- `delta.db` — the copy-on-write SQLite overlay.
+- `mnt/` — where the overlay is mounted while the session is live.
+- `base_path` (Linux) — records the base directory for the session.
+
+Use the full `delta.db` path anywhere the AgentFS CLI accepts an
+`ID_OR_PATH`:
+
+- **Keep changes for next run:** reuse the same session ID;
+  Swival's auto-generated IDs already do this per project.
+- **Discard changes:** remove the session directory,
+  `rm -rf ~/.agentfs/run/<id>`, or start a new session with a
+  different ID.
+- **Inspect changes:**
+  `agentfs diff ~/.agentfs/run/<id>/delta.db`.
+- **Pull files out:** during the session, read them directly
+  from `~/.agentfs/run/<id>/mnt/`. After the session, use
+  `agentfs fs ~/.agentfs/run/<id>/delta.db cat <path>` or
+  `agentfs mount ~/.agentfs/run/<id>/delta.db <mount-point>`.
 
 The overlay does not automatically merge back into the real
 filesystem.

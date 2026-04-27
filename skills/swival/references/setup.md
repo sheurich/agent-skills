@@ -1,6 +1,14 @@
 # Swival Setup
 
-Install Swival, configure the litellm proxy, and verify connectivity.
+Install Swival, optionally configure the litellm proxy, and
+verify connectivity.
+
+The litellm proxy is only needed when you route through
+`provider = "generic"` — in practice, for Vertex AI and for
+Bedrock cross-region inference profiles that the native `bedrock`
+provider doesn't cover. Skip the proxy sections if you're using a
+direct provider (`lmstudio`, `llamacpp`, `huggingface`,
+`openrouter`, `chatgpt`, `google`, or `bedrock`).
 
 ## Prerequisites
 
@@ -97,7 +105,7 @@ provider = "generic"
 model = "claude-opus-4-6"          # default model name from proxy
 base_url = "http://127.0.0.1:4000"
 api_key = "sk-unused"              # proxy requires a key but ignores it
-# yolo = true                      # opt-in: disable filesystem and command restrictions
+# yolo = true                      # opt-in: lift file-access restrictions (commands are already unrestricted by default)
 ```
 
 Swival has a native `bedrock` provider (see `swival --help`),
