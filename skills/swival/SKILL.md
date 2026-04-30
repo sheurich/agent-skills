@@ -77,8 +77,10 @@ an [AgentFS](https://github.com/tursodatabase/agentfs) overlay.
 Writes go to a per-session SQLite-backed overlay instead of the real
 filesystem. Inspect changes with `agentfs diff <session-id>`; there
 is no built-in merge-back command, so persist changes by reusing the
-session ID or copy files out manually. See
-[agentfs.md](./references/agentfs.md) for install and usage.
+session ID or copy files out manually. Use `--sandbox-session ID`
+for persistent state across runs, `--sandbox-strict-read` for read
+isolation. See [agentfs.md](./references/agentfs.md) for install
+and usage.
 
 ### Command access
 
@@ -205,6 +207,7 @@ swival --self-review --objective task.md --verify criteria.md
 | A2A endpoint (server) | `--serve` | `swival --serve --serve-port 8080 --serve-name "Reviewer"` |
 | A2A client config | `--a2a-config FILE` | `swival --a2a-config ./a2a.toml -q "Ask the docs agent..."` |
 | Parallel workers | `--subagents` | `swival --subagents -q "Refactor auth and update tests"` |
+| Proactive summaries | `--proactive-summaries` | Auto-summarize context on long runs (small-context models) |
 | Lifecycle hooks | `--lifecycle-command CMD` | `swival --lifecycle-command ./scripts/sync -q "..."` |
 | Command middleware | `--command-middleware CMD` | `swival --command-middleware ./scripts/gate.py -q "..."` |
 
@@ -244,6 +247,7 @@ swival --model gemini-3.1-pro -q "Summarize this repo"  # Vertex
 
 # Direct providers — no proxy needed
 swival --provider huggingface --model zai-org/GLM-5 -q "Write parser tests"
+swival --provider huggingface --model xiaomi/MiMo-V2.5-7B -q "Write tests"
 swival --provider lmstudio -q "Refactor this"                          # LM Studio on :1234
 swival --provider llamacpp -q "Refactor this"                          # llama.cpp server
 swival --provider openrouter --model anthropic/claude-sonnet-4.5 -q "..."
@@ -253,6 +257,28 @@ swival --provider bedrock --base-url us-east-2 --model <bedrock-id> -q "..."
 
 Proxied model names depend on `~/.config/litellm/config.yaml`.
 Direct providers use their vendor's model identifiers.
+
+### Named profiles
+
+Define `[profiles.NAME]` sections in `config.toml` and switch with
+`--profile NAME` or set `active_profile` as the default:
+
+```bash
+swival --profile fast -q "Quick lint fix"    # uses [profiles.fast]
+swival --list-profiles                       # show available profiles
+```
+
+### Thinking-model flags
+
+For reasoning models (gpt-5.4, QwQ, MiMo-V2.5, DeepSeek-R1):
+
+| Flag | Effect |
+|------|--------|
+| `--reasoning-effort LEVEL` | none / minimal / low / medium / high / xhigh / default |
+| `--sanitize-thinking` | Strip leaked `<think>` tags from responses |
+| `--extra-body JSON` | Pass extra API params, e.g. `'{"chat_template_kwargs": {"enable_thinking": false}}'` |
+| `--no-prompt-cache` | Disable provider-side cache annotations (Anthropic/Gemini/Bedrock) |
+| `--max-context-tokens N` | Request a specific context length (may trigger model reload) |
 
 ## Combining Flags
 
@@ -268,6 +294,9 @@ swival --cache --self-review -q "Add comprehensive error handling"
 
 # Parallel subagents with self-review
 swival --subagents --self-review -q "Refactor auth, update tests, fix docs"
+
+# Nested/automated invocation — disable interactive features
+swival --no-lifecycle --no-mcp --no-a2a -q "Run the migration"
 ```
 
 ## Interactive REPL
@@ -279,6 +308,7 @@ swival --repl
 | Command | Effect |
 |---------|--------|
 | `/init` | Three-pass project scan, writes AGENTS.md |
+| `/audit` | Security and quality audit of the project |
 | `/learn` | Reviews session for mistakes, persists to memory |
 | `/save [label]` | Context checkpoint |
 | `/restore` | Collapse context since checkpoint |
