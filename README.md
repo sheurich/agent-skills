@@ -32,6 +32,12 @@ npx skills add sheurich/agent-skills -s <skill-name> -g
 | --- | --- |
 | [auto-summarize](plugins/auto-summarize/) | Rolling session summary and automatic session naming for Pi. |
 
+## Pi Packages
+
+| Package | Description |
+| --- | --- |
+| [swival-subagent](packages/swival-subagent/) | Pi extension that delegates tasks to a swival subprocess (reviewer loop, AgentFS sandbox, secret encryption). |
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add skills, write tests,
@@ -41,8 +47,9 @@ and run validation.
 
 ```text
 skills/                        # Simple skills (SKILL.md only)
-plugins/                       # Full plugins (own manifests, hooks, LSP, MCP)
-tests/scenarios/               # One scenario per skill
+plugins/                       # Claude Code plugins (own manifests, hooks, LSP, MCP)
+packages/                      # Pi packages (pi.extensions in package.json)
+tests/scenarios/               # One scenario per skill or package
 scripts/validate-extra.sh      # Repo-specific validation checks
 vendor/agent-validate/         # Vendored validator
 validate.sh                    # Thin wrapper → vendor/agent-validate

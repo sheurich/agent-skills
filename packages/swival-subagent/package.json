@@ -1,0 +1,17 @@
+{
+  "name": "pi-swival-subagent",
+  "version": "1.0.0",
+  "description": "Pi extension that delegates tasks to a swival subprocess (reviewer loop, AgentFS sandbox, secret encryption)",
+  "keywords": ["pi-package", "pi-extension", "swival", "subagent"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-agent-core": "*",
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "typebox": "*"
+  }
+}

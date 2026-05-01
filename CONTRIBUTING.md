@@ -108,6 +108,30 @@ Add a new entry to the `plugins` array in `.claude-plugin/marketplace.json`:
 Keep metadata (name, version, description) consistent across
 `plugin.json` and `gemini-extension.json`.
 
+### Pi package
+
+For Pi-specific extensions that use Pi's extension API. These are not
+installable by Claude Code and do not go in `plugins/` or
+`.claude-plugin/marketplace.json`.
+
+```text
+packages/my-package/
+├── package.json        # "pi": { "extensions": ["./extensions"] }
+├── README.md
+└── extensions/
+    └── index.ts
+```
+
+Pi discovers the extension via the `pi.extensions` field in `package.json`.
+Install with:
+
+```bash
+pi install https://github.com/sheurich/agent-skills
+```
+
+Add a row to the "Pi Packages" table in `README.md`. Add a test scenario
+at `tests/scenarios/my-package/scenario.md` (required by `validate.sh`).
+
 ## Writing a SKILL.md
 
 ### Frontmatter
