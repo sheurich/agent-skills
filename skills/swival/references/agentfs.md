@@ -5,6 +5,12 @@ OS-enforced filesystem isolation via
 to a session overlay stored in a SQLite database. Changes persist
 across runs that reuse the same session ID.
 
+> **No automatic merge-back.** The overlay stays in
+> `~/.agentfs/run/<id>/delta.db` until you either reuse the session
+> ID for another run or copy files out with `agentfs fs` / `agentfs
+> mount`. Discard by removing the session directory. Nothing lands
+> on the real filesystem unless you explicitly extract it.
+
 ## Install
 
 Quick install (upstream one-liner):
@@ -14,9 +20,12 @@ curl -fsSL https://agentfs.ai/install | bash
 ```
 
 The installer downloads a prebuilt binary from the latest GitHub
-release. It works on macOS (x86_64, arm64) and Linux (x86_64,
-aarch64). No Homebrew formula exists as of v0.6.4 — only the Turso
-`turso` CLI ships via their Homebrew tap.
+release. It works on macOS (x86_64, arm64), Windows (x86_64), and
+Linux (x86_64, aarch64). No Homebrew formula exists as of AgentFS
+0.6.4 — only the Turso `turso` CLI ships via their Homebrew tap.
+Check the [releases
+page](https://github.com/tursodatabase/agentfs/releases) for
+current versions before pinning.
 
 ### Safer install (pinned + checksum-verified)
 
@@ -24,7 +33,8 @@ Piping a remote script into `bash` leaves you exposed to the
 upstream host being compromised or to a MITM swapping the payload.
 If that's a concern, download a pinned release and verify against
 the published `sha256.sum` first. Pick your platform triple and
-version:
+version; the `VERSION` below is known-good as of March 2026, re-check
+upstream before relying on it:
 
 ```bash
 VERSION=v0.6.4
@@ -113,8 +123,12 @@ fresh overlay every time.
 ## Strict read isolation
 
 `--sandbox-strict-read` restricts reads to the allowed directories
-as well. Requires a version of AgentFS with strict read support
-(not yet released as of v0.6.x).
+as well as writes. The flag requires strict-read support in
+AgentFS, which is not in the 0.6.x line as of 0.6.4 (March 2026);
+Swival accepts the flag but AgentFS will no-op it until a release
+lands support. Track
+[tursodatabase/agentfs](https://github.com/tursodatabase/agentfs/releases)
+for progress.
 
 ## How it works
 

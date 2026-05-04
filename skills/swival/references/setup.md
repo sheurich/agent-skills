@@ -98,7 +98,17 @@ litellm_settings:
 
 ## Create Swival config
 
-Write `~/.config/swival/config.toml`:
+On first run in an interactive terminal with no existing config,
+Swival offers an onboarding flow that writes
+`~/.config/swival/config.toml` with a `[profiles.default]` block
+matching the profile structure used elsewhere (since 1.0.13). Skip
+it and write the config by hand if you need a specific shape.
+
+Run `swival --init-config` to (re)generate a template non-interactively;
+add `--project` with `--base-dir <dir>` to write `swival.toml` under
+the project root instead of the global path.
+
+### Via the litellm proxy (Vertex / cross-region Bedrock)
 
 ```toml
 provider = "generic"
@@ -108,14 +118,35 @@ api_key = "sk-unused"              # proxy requires a key but ignores it
 # yolo = true                      # opt-in: lift file-access restrictions (commands are already unrestricted by default)
 ```
 
-Swival has a native `bedrock` provider (see `swival --help`),
-but it has quirks (region passed via `--base-url`, limited model
-coverage). The litellm proxy handles cross-region inference
-profiles more cleanly. Swival has no native Vertex AI provider,
-so Vertex must go through the proxy.
-
 The `generic` provider points Swival at the litellm proxy, which
-translates to the real provider.
+translates to the real provider. Use this path for Vertex AI and
+for Bedrock cross-region inference profiles.
+
+### Direct Bedrock (no proxy)
+
+Swival's native `bedrock` provider covers same-region inference
+profiles that don't need litellm. Region goes in `--base-url` (or
+as `base_url` in `config.toml`), and `--aws-profile` (or
+`AWS_PROFILE`) selects credentials from `~/.aws/config`.
+
+```toml
+provider = "bedrock"
+model = "us.anthropic.claude-opus-4-6-v1"
+base_url = "us-east-2"
+# aws_profile = "prod"             # optional; overrides AWS_PROFILE
+```
+
+```bash
+swival --provider bedrock --base-url us-east-2 \
+  --model us.anthropic.claude-opus-4-6-v1 \
+  --aws-profile prod -q "Refactor this"
+```
+
+The native provider has limits (region encoded into `--base-url`,
+model coverage narrower than litellm), so the proxy is still
+preferred for multi-region setups or for anything Vertex.
+
+### File-access defaults
 
 By default, Swival restricts file access to the base directory
 (auto-detected project root, or the current directory). Command
@@ -143,9 +174,19 @@ file exists before starting the proxy.
 
 ## Verify
 
+### Via litellm proxy
+
 ```bash
 swival-proxy start
 swival --model claude-haiku-4-5 -q "Say hello"
+```
+
+### Direct Bedrock (no proxy)
+
+```bash
+swival --provider bedrock --base-url us-east-2 \
+  --model us.anthropic.claude-haiku-4-5-20251001-v1:0 \
+  -q "Say hello"
 ```
 
 ## Troubleshooting
