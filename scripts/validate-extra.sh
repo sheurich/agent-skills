@@ -35,6 +35,16 @@ for plugin_dir in plugins/*/; do
   done
 done
 
+for package_dir in packages/*/; do
+  [[ -d "$package_dir" ]] || continue
+  package_name=$(basename "$package_dir")
+  [[ "$package_name" == ".gitkeep" ]] && continue
+  if [[ ! -f "tests/scenarios/${package_name}/scenario.md" ]]; then
+    echo "Error: package '$package_name' has no test scenario (expected tests/scenarios/${package_name}/scenario.md)" >&2
+    errors=$((errors + 1))
+  fi
+done
+
 # --- marketplace.json checks (require jq) ---
 
 marketplace=".claude-plugin/marketplace.json"
@@ -71,12 +81,24 @@ elif [[ -f "$marketplace" ]]; then
     fi
   done < <(jq -r '.plugins[0].skills // [] | .[]' "$marketplace" 2>/dev/null)
 
-  # Plugin entry check: every plugins/ directory has a marketplace entry
+  # Plugin entry check: every plugins/ directory has a marketplace entry,
+  # unless the plugin is Pi-only (declares `pi.extensions` in its
+  # package.json). Pi extensions use a different discovery mechanism and
+  # cannot be loaded by Claude Code.
   echo "Checking marketplace.json plugin entries"
   for plugin_dir in plugins/*/; do
     [[ -d "$plugin_dir" ]] || continue
     plugin_name=$(basename "$plugin_dir")
     [[ "$plugin_name" == ".gitkeep" ]] && continue
+
+    # Skip Pi extensions — they declare themselves via the "pi.extensions"
+    # field in package.json and are not installable by Claude Code.
+    if [[ -f "${plugin_dir}package.json" ]] && \
+       command -v jq >/dev/null 2>&1 && \
+       jq -e '.pi.extensions' "${plugin_dir}package.json" >/dev/null 2>&1; then
+      continue
+    fi
+
     plugin_source="./plugins/$plugin_name"
     if ! jq -e --arg s "$plugin_source" '[.plugins[] | .source] | index($s) != null' "$marketplace" >/dev/null 2>&1; then
       echo "Error: plugin '$plugin_name' has no entry in marketplace.json (expected source: '$plugin_source')" >&2
