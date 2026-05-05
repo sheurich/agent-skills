@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { complete, type Api, type Model } from "@mariozechner/pi-ai";
 import type { CustomEntry, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { selectCheapModel } from "./model-selection.ts";
+import { createSummaryContext } from "./summary-request.ts";
 
 type ContentBlock = {
   type?: string;
@@ -318,7 +319,7 @@ export default function (pi: ExtensionAPI) {
     try {
       const response = await complete(
         m,
-        { messages: [{ role: "user" as const, content: [{ type: "text" as const, text: prompt }], timestamp: Date.now() }] },
+        createSummaryContext(prompt),
         { apiKey: auth.apiKey, headers: auth.headers, maxTokens: 1024 },
       );
 

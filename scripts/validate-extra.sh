@@ -45,6 +45,13 @@ for package_dir in packages/*/; do
   fi
 done
 
+# --- Pi plugin tests ---
+
+if compgen -G "plugins/auto-summarize/tests/*.test.mjs" >/dev/null; then
+  echo "Running auto-summarize tests"
+  node --test plugins/auto-summarize/tests/*.test.mjs
+fi
+
 # --- marketplace.json checks (require jq) ---
 
 marketplace=".claude-plugin/marketplace.json"
