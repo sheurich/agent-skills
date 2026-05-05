@@ -10,8 +10,12 @@
  *   /autoname  - force a full re-summarize from the entire branch
  */
 
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { complete, type Api, type Model } from "@mariozechner/pi-ai";
 import type { CustomEntry, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { selectCheapModel } from "./model-selection.ts";
 
 type ContentBlock = {
   type?: string;
@@ -146,33 +150,22 @@ function parseJson(text: string): SummaryData | null {
   }
 }
 
-/**
- * Cheap model candidates in preference order (substring matched against model ID).
- * Haiku is ideal; GPT mini and Gemini Flash are comparable cost; Sonnet is a
- * last resort for providers that lack cheaper options (e.g. Antigravity).
- */
-const CHEAP_MODEL_CANDIDATES = [
-  "haiku-4-5",
-  "gpt-5-mini",
-  "gpt-4o-mini",
-  "gemini-3-flash",
-  "claude-sonnet-4-5",
-];
-
-/** Try known cheap models in preference order, picking the first with auth. */
-function findModel(ctx: ExtensionContext): Model<Api> | undefined {
-  const all = ctx.modelRegistry.getAll();
-
-  for (const substr of CHEAP_MODEL_CANDIDATES) {
-    const matches = all.filter((m) => m.id.includes(substr) && ctx.modelRegistry.hasConfiguredAuth(m));
-    if (matches.length === 0) continue;
-    // Prefer: ARN (custom inference profile) > global cross-region > first match.
-    return matches.find((m) => m.id.startsWith("arn:"))
-      ?? matches.find((m) => m.id.startsWith("global."))
-      ?? matches[0];
+function loadPiSettings(): Record<string, unknown> {
+  const configDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
+  try {
+    return JSON.parse(readFileSync(join(configDir, "settings.json"), "utf8"));
+  } catch {
+    return {};
   }
+}
 
-  return undefined;
+/** Try the configured cheap model first, then known cheap fallbacks. */
+function findModel(ctx: ExtensionContext): Model<Api> | undefined {
+  return selectCheapModel(
+    ctx.modelRegistry.getAll(),
+    (m) => ctx.modelRegistry.hasConfiguredAuth(m),
+    loadPiSettings(),
+  ) as Model<Api> | undefined;
 }
 
 export default function (pi: ExtensionAPI) {

@@ -2,10 +2,11 @@
   "name": "pi-auto-summarize",
   "version": "1.0.0",
   "description": "Rolling session summary and automatic session naming for Pi",
+  "type": "module",
   "keywords": ["pi-package"],
   "license": "MIT",
   "pi": {
-    "extensions": ["./extensions"]
+    "extensions": ["./extensions/auto-summarize"]
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",

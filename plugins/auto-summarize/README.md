@@ -4,9 +4,9 @@ Rolling session summary and automatic session naming for
 [Pi](https://github.com/nicorevin/pi-coding-agent).
 
 After every agent turn, the extension sends the conversation delta to a
-cheap model (Claude Haiku 4.5 or GPT-5.4 mini) in the background and maintains a concise bullet-point
-summary plus a short session title. The summary survives session reloads
-and compactions.
+configured cheap model in the background and maintains a concise
+bullet-point summary plus a short session title. The summary survives
+session reloads and compactions.
 
 ## Install
 
@@ -31,9 +31,10 @@ pi install /path/to/plugins/auto-summarize
    that complete before the LLM responds are batched into a single
    prompt.
 
-3. **LLM call** — The current summary and new deltas are sent to
-   Claude Haiku 4.5 (resolved from the model registry, preferring a
-   Bedrock ARN when available). The prompt requests JSON output:
+3. **LLM call** — The current summary and new deltas are sent to the
+   configured cheap model. The extension checks `autoSummarize.model`
+   first, then the `scout` subagent override, then known cheap fallback
+   models. The prompt requests JSON output:
    `{"title": "...", "summary": "..."}` with 3–8 bullet points and a
    ≤72-character title in `topic: what happened` format.
 
@@ -56,8 +57,8 @@ clears pending async state and restores the summary from the most recent
 
 - **Silent failure.** Every error path is swallowed — the summary is a
   background convenience that must never disrupt the primary session.
-- **Model caching.** The Haiku model is resolved once per session to
-  avoid repeated registry lookups.
+- **Model caching.** The summarizer model is resolved once per session
+  to avoid repeated registry lookups.
 - **Lenient JSON parsing.** Strips markdown fences and normalizes array
   responses into bullet-point format.
 - **Authentication** is delegated to the Pi model registry, so the
@@ -66,10 +67,21 @@ clears pending async state and restores the summary from the most recent
 
 ## Requirements
 
-The extension searches the model registry for a cheap, fast model in
-preference order: Bedrock Haiku 4.5 ARN, direct Anthropic Haiku 4.5,
-then GPT-5.4 mini. At least one must be available with valid API key
-credentials.
+Set `autoSummarize.model` in `~/.pi/agent/settings.json` to the model
+Pi should use for background summaries, for example:
+
+```json
+{
+  "autoSummarize": {
+    "model": "openai-codex/gpt-5.4-mini"
+  }
+}
+```
+
+If that setting is absent, the extension falls back to the `scout`
+subagent override and then to built-in cheap model candidates such as
+Claude Haiku 4.5 and GPT-5.4 mini. The selected model must be available
+with valid credentials in Pi's model registry.
 
 ## License
 
