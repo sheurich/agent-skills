@@ -36,10 +36,22 @@ Or install the plugin directly:
 pi install /path/to/agent-skills/packages/swival-subagent
 ```
 
-The plugin exposes one tool (`swival-subagent`) and three example agent
-definitions (`reviewed-worker`, `test-runner`, `sandboxed-explorer`) in
-`agents/`. Copy or symlink them into `~/.pi/agent/swival-agents/` to
-make them discoverable.
+The plugin exposes one tool (`swival-subagent`) and four agent
+definitions (`swival`, `reviewed-worker`, `test-runner`,
+`sandboxed-explorer`) in `agents/`. Copy or symlink them into
+`~/.pi/agent/swival-agents/` to make them discoverable.
+
+### Agent selection
+
+| Agent | Use when |
+|-------|----------|
+| `swival` | Generic delegate — no system prompt, no review. Also the implicit default when `agent` is omitted. |
+| `reviewed-worker` | Multi-file code changes or any task where a second pass catches mistakes |
+| `test-runner` | Task has a runnable test command (caller must pass `reviewerOverride`) |
+| `sandboxed-explorer` | Exploratory changes you want to inspect before applying |
+
+When `task` is provided without `agent`, the tool defaults to the
+generic `swival` agent.
 
 ## Layout
 
@@ -50,7 +62,8 @@ packages/swival-subagent/
 ├── extensions/
 │   ├── index.ts        # the extension
 │   └── agents.ts       # agent discovery
-├── agents/             # example swival agent definitions
+├── agents/             # swival agent definitions
+│   ├── swival.md
 │   ├── reviewed-worker.md
 │   ├── test-runner.md
 │   └── sandboxed-explorer.md
@@ -68,7 +81,8 @@ fields. All fields are optional except `name` and `description`.
 name: my-agent
 description: What this agent does
 
-# Provider / model (uses swival defaults if omitted)
+# Provider / model — omit to inherit from config.toml (recommended)
+# Only set these if the agent requires a specific model regardless of environment.
 provider: generic          # lmstudio | llamacpp | huggingface | openrouter | generic | google | chatgpt | bedrock
 profile: fast              # named profile from config.toml
 model: claude-sonnet-4-6   # provider-specific model id
@@ -128,11 +142,25 @@ System prompt body here.
 
 ## Usage from Pi
 
-Single:
+Single (default agent, no review):
 
 ```text
-Use the `swival-subagent` tool with agent: "reviewed-worker"
+Use `swival-subagent` with task: "Refactor the auth module".
+```
+
+Single (self-reviewed):
+
+```text
+Use `swival-subagent` with agent: "reviewed-worker"
 and task: "Add input validation to cmd/serve.go".
+```
+
+Test-as-contract:
+
+```text
+Use `swival-subagent` with agent: "test-runner",
+reviewerOverride: "./run-tests.sh",
+and task: "Make the failing tests pass".
 ```
 
 Parallel:
@@ -140,7 +168,7 @@ Parallel:
 ```text
 Use `swival-subagent` with tasks: [
   { agent: "reviewed-worker", task: "Refactor auth module" },
-  { agent: "test-runner",     task: "Fix failing parser tests" }
+  { agent: "reviewed-worker", task: "Add error handling to parser" }
 ]
 ```
 
@@ -174,6 +202,8 @@ per call:
 | `providerOverride`          | `--provider`               |
 | `baseUrlOverride`           | `--base-url`               |
 | `selfReviewOverride`        | `--self-review`            |
+| `reviewerOverride`          | `--reviewer`               |
+| `reviewPromptOverride`      | `--review-prompt`          |
 | `maxReviewRoundsOverride`   | `--max-review-rounds`      |
 | `maxTurnsOverride`          | `--max-turns`              |
 | `maxOutputTokensOverride`   | `--max-output-tokens`      |
@@ -183,6 +213,8 @@ per call:
 | `reasoningEffortOverride`   | `--reasoning-effort`       |
 | `cacheOverride`             | `--cache`                  |
 | `cacheDirOverride`          | `--cache-dir`              |
+| `verifyOverride`            | `--verify`                 |
+| `encryptSecretsOverride`    | `--encrypt-secrets`        |
 
 Overrides apply to every step in parallel and chain modes.
 

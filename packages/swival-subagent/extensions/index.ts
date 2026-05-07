@@ -90,6 +90,8 @@ export interface SwivalOverrides {
 	cache?: boolean;
 	cacheDir?: string;
 	traceDir?: string;
+	verify?: string;
+	encryptSecrets?: boolean;
 }
 
 export function buildSwivalArgs(
@@ -155,7 +157,8 @@ export function buildSwivalArgs(
 	}
 	const reviewPrompt = overrides.reviewPrompt ?? agent.reviewPrompt;
 	if (reviewPrompt) args.push("--review-prompt", reviewPrompt);
-	if (agent.verify) args.push("--verify", agent.verify);
+	const verify = overrides.verify ?? agent.verify;
+	if (verify) args.push("--verify", verify);
 	const maxReviewRounds = overrides.maxReviewRounds ?? agent.maxReviewRounds;
 	if (maxReviewRounds !== undefined) args.push("--max-review-rounds", String(maxReviewRounds));
 
@@ -176,7 +179,8 @@ export function buildSwivalArgs(
 	else if (cwd) args.push("--base-dir", cwd);
 	for (const d of agent.addDir ?? []) args.push("--add-dir", d);
 	for (const d of agent.addDirRo ?? []) args.push("--add-dir-ro", d);
-	if (agent.encryptSecrets) args.push("--encrypt-secrets");
+	const encryptSecrets = overrides.encryptSecrets ?? agent.encryptSecrets;
+	if (encryptSecrets) args.push("--encrypt-secrets");
 	if (agent.noReadGuard) args.push("--no-read-guard");
 
 	// Prompt / memory (noMemory is handled above in nested-invocation hygiene)
@@ -917,6 +921,12 @@ const SwivalParams = Type.Object({
 	),
 	cacheOverride: Type.Optional(Type.Boolean({ description: "Override --cache for this call." })),
 	cacheDirOverride: Type.Optional(Type.String({ description: "Override --cache-dir for this call." })),
+	verifyOverride: Type.Optional(
+		Type.String({ description: "Override --verify acceptance criteria file for this call." }),
+	),
+	encryptSecretsOverride: Type.Optional(
+		Type.Boolean({ description: "Override --encrypt-secrets for this call." }),
+	),
 });
 
 function buildOverridesFromParams(params: Record<string, unknown>): SwivalOverrides {
@@ -938,6 +948,8 @@ function buildOverridesFromParams(params: Record<string, unknown>): SwivalOverri
 		reasoningEffort: g<string>("reasoningEffortOverride"),
 		cache: g<boolean>("cacheOverride"),
 		cacheDir: g<string>("cacheDirOverride"),
+		verify: g<string>("verifyOverride"),
+		encryptSecrets: g<boolean>("encryptSecretsOverride"),
 	};
 }
 
