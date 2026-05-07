@@ -32,6 +32,16 @@ Create a skill when:
 Don't create skills for one-off solutions, standard practices, or
 constraints enforceable with automation.
 
+## Does This Skill Reduce Review Time?
+
+The evaluator is the bottleneck, not the agent. A skill that increases agent throughput without collapsing a review step makes the backlog worse.
+
+Every proposed skill and every major edit must answer three questions in the SKILL.md or PR description: (1) Which review step does this skill eliminate or shorten? Name the concrete human action — reading a log, cross-referencing a spec, verifying a checklist — that this skill absorbs. (2) What evidence supports the claim? A before/after measurement, a session transcript, or a worked example showing the evaluator doing less. (3) What does the human stop doing? If the answer is "nothing" or "they still review the same artifacts," the skill fails this gate.
+
+Some patterns reliably fail. Orchestration for its own sake — skills whose value proposition is "coordinates other agents" without identifying which review artifact disappears. Parallelism without a serialization bottleneck downstream — splitting work across agents when the human still reviews each output individually, meaning wall-clock savings accrue to the agent while review cost stays constant or increases. "Agent swarm" framings that treat agent utilization as the metric instead of evaluator time freed. Meta-skills that exist only as routing layers for other skills, adding indirection without absorbing any review surface.
+
+A skill that genuinely passes this filter will have an obvious answer to question one. If you struggle to articulate which human action shrinks, the skill is optimizing the wrong side of the pipeline.
+
 ## What to Include
 
 Only instructions that change agent behavior in ways the codebase
