@@ -22,8 +22,11 @@ PI_PKG=""
 npm_global_root=""
 npm_global_root="$(npm root -g 2>/dev/null)" || npm_global_root=""
 for candidate in \
+	/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent \
 	/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent \
+	"${HOME}/.local/share/npm/lib/node_modules/@earendil-works/pi-coding-agent" \
 	"${HOME}/.local/share/npm/lib/node_modules/@mariozechner/pi-coding-agent" \
+	${npm_global_root:+"${npm_global_root}/@earendil-works/pi-coding-agent"} \
 	${npm_global_root:+"${npm_global_root}/@mariozechner/pi-coding-agent"}; do
 	if [[ -d "$candidate" ]]; then
 		PI_PKG="$candidate"
@@ -32,13 +35,25 @@ for candidate in \
 done
 
 if [[ -z "$PI_PKG" ]]; then
-	echo "error: could not locate @mariozechner/pi-coding-agent; install Pi first." >&2
+	echo "error: could not locate pi-coding-agent (@earendil-works or @mariozechner); install Pi first." >&2
 	exit 1
 fi
 
 mkdir -p node_modules/@mariozechner
+
+# Determine the scope prefix used by this install (@earendil-works or @mariozechner).
+if [[ -d "${PI_PKG}/node_modules/@earendil-works/pi-ai" ]]; then
+	PI_SCOPE="@earendil-works"
+elif [[ -d "${PI_PKG}/node_modules/@mariozechner/pi-ai" ]]; then
+	PI_SCOPE="@mariozechner"
+else
+	echo "error: cannot find pi-ai under ${PI_PKG}/node_modules/" >&2
+	exit 1
+fi
+
+# The extension imports from @mariozechner/* — symlink regardless of actual scope.
 for pkg in pi-ai pi-agent-core pi-tui; do
-	ln -sfn "${PI_PKG}/node_modules/@mariozechner/${pkg}" "node_modules/@mariozechner/${pkg}"
+	ln -sfn "${PI_PKG}/node_modules/${PI_SCOPE}/${pkg}" "node_modules/@mariozechner/${pkg}"
 done
 ln -sfn "$PI_PKG" node_modules/@mariozechner/pi-coding-agent
 ln -sfn "${PI_PKG}/node_modules/typebox" node_modules/typebox

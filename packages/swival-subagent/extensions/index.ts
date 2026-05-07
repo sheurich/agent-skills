@@ -78,6 +78,8 @@ export interface SwivalOverrides {
 	provider?: string;
 	baseUrl?: string;
 	selfReview?: boolean;
+	reviewer?: string;
+	reviewPrompt?: string;
 	maxReviewRounds?: number;
 	temperature?: number;
 	topP?: number;
@@ -145,12 +147,14 @@ export function buildSwivalArgs(
 	// swival's argparse (hard crash: "cannot be used together"). When
 	// selfReview is truthy, skip --reviewer even if the agent sets one.
 	const selfReview = overrides.selfReview ?? agent.selfReview;
+	const reviewer = overrides.reviewer ?? agent.reviewer;
 	if (selfReview) {
 		args.push("--self-review");
-	} else if (agent.reviewer) {
-		args.push("--reviewer", agent.reviewer);
+	} else if (reviewer) {
+		args.push("--reviewer", reviewer);
 	}
-	if (agent.reviewPrompt) args.push("--review-prompt", agent.reviewPrompt);
+	const reviewPrompt = overrides.reviewPrompt ?? agent.reviewPrompt;
+	if (reviewPrompt) args.push("--review-prompt", reviewPrompt);
 	if (agent.verify) args.push("--verify", agent.verify);
 	const maxReviewRounds = overrides.maxReviewRounds ?? agent.maxReviewRounds;
 	if (maxReviewRounds !== undefined) args.push("--max-review-rounds", String(maxReviewRounds));
@@ -889,6 +893,15 @@ const SwivalParams = Type.Object({
 				"Force-enable (true) or suppress (false) --self-review; cannot disable an active --reviewer script set by the agent.",
 		}),
 	),
+	reviewerOverride: Type.Optional(
+		Type.String({
+			description:
+				"Override --reviewer script path for this call. Mutually exclusive with selfReviewOverride=true.",
+		}),
+	),
+	reviewPromptOverride: Type.Optional(
+		Type.String({ description: "Override --review-prompt for this call." }),
+	),
 	maxReviewRoundsOverride: Type.Optional(
 		Type.Number({ description: "Override --max-review-rounds for this call." }),
 	),
@@ -914,6 +927,8 @@ function buildOverridesFromParams(params: Record<string, unknown>): SwivalOverri
 		provider: g<string>("providerOverride"),
 		baseUrl: g<string>("baseUrlOverride"),
 		selfReview: g<boolean>("selfReviewOverride"),
+		reviewer: g<string>("reviewerOverride"),
+		reviewPrompt: g<string>("reviewPromptOverride"),
 		maxReviewRounds: g<number>("maxReviewRoundsOverride"),
 		maxTurns: g<number>("maxTurnsOverride"),
 		maxOutputTokens: g<number>("maxOutputTokensOverride"),
@@ -1003,6 +1018,10 @@ export default function (pi: ExtensionAPI) {
 
 			const hasChain = (params.chain?.length ?? 0) > 0;
 			const hasTasks = (params.tasks?.length ?? 0) > 0;
+			// Default to the generic "swival" agent when task is provided without an explicit agent.
+			if (!params.agent && params.task && !hasChain && !hasTasks) {
+				params.agent = "swival";
+			}
 			const hasSingle = Boolean(params.agent && params.task);
 			const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
 
