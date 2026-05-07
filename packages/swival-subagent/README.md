@@ -222,7 +222,7 @@ Overrides apply to every step in parallel and chain modes.
 
 | Feature                   | pi `subagent`        | `swival-subagent`    |
 |---------------------------|----------------------|----------------------|
-| Per-tool-call streaming   | yes (`--mode json`)  | yes (trace tailing)  |
+| Per-tool-call streaming   | yes (`--mode json`)  | post-run replay (trace tail at session end) |
 | Reviewer loop             | no                   | yes                  |
 | Test-as-contract          | no                   | yes                  |
 | AgentFS sandbox           | no                   | yes                  |

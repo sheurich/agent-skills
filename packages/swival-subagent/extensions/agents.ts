@@ -73,6 +73,7 @@ export interface SwivalAgentConfig {
 	noA2a?: boolean;
 	noHistory?: boolean;
 	noContinue?: boolean;
+	noSubagents?: boolean;
 
 	// Output control
 	quiet?: boolean;
@@ -198,6 +199,7 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): SwivalAgent
 			noA2a: asBool(fm.noA2a),
 			noHistory: asBool(fm.noHistory),
 			noContinue: asBool(fm.noContinue),
+			noSubagents: asBool(fm.noSubagents),
 
 			quiet: asBool(fm.quiet),
 			extraArgs: asStringArray(fm.extraArgs),
