@@ -103,13 +103,16 @@ export function buildSwivalArgs(
 	const args: string[] = [];
 
 	// Nested-invocation hygiene: default to disabling lifecycle / MCP / A2A /
-	// history / continue / memory unless the agent explicitly opts in (field=false).
+	// history / continue / memory / subagents unless the agent explicitly opts
+	// in (field=false). --no-subagents prevents a nested swival from spawning
+	// its own sub-subagents (unbounded recursion risk).
 	if (agent.noLifecycle !== false) args.push("--no-lifecycle");
 	if (agent.noMcp !== false) args.push("--no-mcp");
 	if (agent.noA2a !== false) args.push("--no-a2a");
 	if (agent.noHistory !== false) args.push("--no-history");
 	if (agent.noContinue !== false) args.push("--no-continue");
 	if (agent.noMemory !== false) args.push("--no-memory");
+	if (agent.noSubagents !== false) args.push("--no-subagents");
 
 	// Provider / model (overrides outrank frontmatter)
 	const provider = overrides.provider ?? agent.provider;
@@ -363,6 +366,23 @@ export function summarizeReport(raw: Record<string, unknown>): ReportSummary {
 	};
 }
 
+function validateToolCallsByName(
+	raw: unknown,
+): ReportSummary["toolCallsByName"] {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+	const out: Record<string, { succeeded?: number; failed?: number }> = {};
+	for (const [name, val] of Object.entries(raw as Record<string, unknown>)) {
+		if (!val || typeof val !== "object" || Array.isArray(val)) continue;
+		const v = val as Record<string, unknown>;
+		const succeeded = toNum(v.succeeded);
+		const failed = toNum(v.failed);
+		if (succeeded !== undefined || failed !== undefined) {
+			out[name] = { succeeded, failed };
+		}
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
 async function readReport(reportPath: string): Promise<ReportSummary | undefined> {
 	try {
 		const txt = await fs.promises.readFile(reportPath, "utf-8");
@@ -467,23 +487,6 @@ export function classifyFailure(
  * Returns an async cleanup that flushes any remaining content and stops
  * the watcher.
  */
-function validateToolCallsByName(
-	raw: unknown,
-): ReportSummary["toolCallsByName"] {
-	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-	const out: Record<string, { succeeded?: number; failed?: number }> = {};
-	for (const [name, val] of Object.entries(raw as Record<string, unknown>)) {
-		if (!val || typeof val !== "object" || Array.isArray(val)) continue;
-		const v = val as Record<string, unknown>;
-		const succeeded = toNum(v.succeeded);
-		const failed = toNum(v.failed);
-		if (succeeded !== undefined || failed !== undefined) {
-			out[name] = { succeeded, failed };
-		}
-	}
-	return Object.keys(out).length > 0 ? out : undefined;
-}
-
 export function startTraceTail(
 	traceDir: string,
 	onEvent: (event: TraceEvent) => void,
