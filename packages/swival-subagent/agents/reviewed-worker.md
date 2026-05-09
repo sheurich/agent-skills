@@ -1,6 +1,6 @@
 ---
 name: reviewed-worker
-description: General-purpose worker with swival self-review. Use for any task where you want a second pass over the output before accepting. The reviewer inherits provider and model from this agent and runs in a fresh context.
+description: General-purpose worker with swival self-review. Use for any task where you want a second pass over the output before accepting. The reviewer uses Swival's configured provider and model in a fresh context.
 selfReview: true
 maxReviewRounds: 5
 files: some

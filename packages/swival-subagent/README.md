@@ -82,10 +82,11 @@ name: my-agent
 description: What this agent does
 
 # Provider / model — omit to inherit from config.toml (recommended)
-# Only set these if the agent requires a specific model regardless of environment.
+# Use profile for named routes such as fast or heavy.
+# Set model only for an explicit one-off model request.
 provider: generic          # lmstudio | llamacpp | huggingface | openrouter | generic | google | chatgpt | bedrock
 profile: fast              # named profile from config.toml
-model: claude-sonnet-4-6   # provider-specific model id
+model: claude-sonnet-4-6   # provider-specific model id escape hatch
 baseUrl: http://127.0.0.1:4000
 
 # Sampling / limits
@@ -192,8 +193,8 @@ and pass each step's output as context to the next.
 
 ### Dispatch-time overrides
 
-All agent frontmatter is canonical. Callers may override specific fields
-per call:
+All agent frontmatter is canonical. Callers may override specific fields per call.
+Prefer `profileOverride` for model routing (`fast`, `heavy`, or another named profile). Use `modelOverride` only when the user explicitly asks for an exact one-off model.
 
 | Tool param                  | swival flag                |
 |-----------------------------|----------------------------|
@@ -217,6 +218,7 @@ per call:
 | `encryptSecretsOverride`    | `--encrypt-secrets`        |
 
 Overrides apply to every step in parallel and chain modes.
+Bundled agents omit `model` so Swival's `config.toml` selects the default model for the host.
 
 ## Tradeoffs vs pi's subagent
 

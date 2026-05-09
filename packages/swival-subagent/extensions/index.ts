@@ -888,8 +888,15 @@ const SwivalParams = Type.Object({
 	cwd: Type.Optional(Type.String({ description: "Working directory for the swival process (single mode)" })),
 
 	// Dispatch-time overrides (outrank agent frontmatter).
-	modelOverride: Type.Optional(Type.String({ description: "Override the agent's model for this call." })),
-	profileOverride: Type.Optional(Type.String({ description: "Override the agent's profile for this call." })),
+	modelOverride: Type.Optional(
+		Type.String({
+			description:
+				"Override the exact model for this call. Prefer profileOverride; use this only when the user explicitly requests a one-off model.",
+		}),
+	),
+	profileOverride: Type.Optional(
+		Type.String({ description: "Override the agent's named Swival profile for this call, such as fast or heavy." }),
+	),
 	providerOverride: Type.Optional(Type.String({ description: "Override the agent's provider for this call." })),
 	baseUrlOverride: Type.Optional(
 		Type.String({ description: "Override the agent's base URL for this call." }),
