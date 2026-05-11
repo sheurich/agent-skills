@@ -102,88 +102,123 @@ describe("summarizeReport", () => {
 
 describe("classifyFailure", () => {
 	it("returns undefined when report.outcome=failed but reviewRounds is 0", () => {
-		const msg = classifyFailure([], { outcome: "failed", reviewRounds: 0 } as ReturnType<typeof summarizeReport>);
-		expect(msg).toBeUndefined();
+		const res = classifyFailure([], { outcome: "failed", reviewRounds: 0 } as ReturnType<typeof summarizeReport>);
+		expect(res).toBeUndefined();
 	});
 
 	it("returns a rounds-exhausted message when report.outcome=failed and reviewRounds set", () => {
 		const raw = loadFixture("report-rejected.json");
 		const s = summarizeReport(raw);
-		expect(classifyFailure([], s)).toMatch(/Reviewer rejected after 2 rounds/);
+		const res = classifyFailure([], s);
+		expect(res?.code).toBe("review_rejected");
+		expect(res?.text).toMatch(/Reviewer rejected after 2 rounds/);
 	});
 
 	it("recognises expired AWS SSO sessions", () => {
-		const msg = classifyFailure(["botocore.exceptions.TokenRetrievalError: The SSO session has expired"]);
-		expect(msg).toMatch(/AWS SSO/i);
+		const res = classifyFailure(["botocore.exceptions.TokenRetrievalError: The SSO session has expired"]);
+		expect(res?.code).toBe("provider_auth");
+		expect(res?.text).toMatch(/AWS SSO/i);
 	});
 
 	it("recognises 401 Unauthorized from the LLM provider", () => {
-		const msg = classifyFailure(["upstream error: 401 Unauthorized: invalid API key"]);
-		expect(msg).toMatch(/401/);
+		const res = classifyFailure(["upstream error: 401 Unauthorized: invalid API key"]);
+		expect(res?.code).toBe("provider_auth");
+		expect(res?.text).toMatch(/401/);
 	});
 
 	it("recognises ECONNREFUSED (proxy down)", () => {
-		const msg = classifyFailure(["ConnectError: connect ECONNREFUSED 127.0.0.1:4000"]);
-		expect(msg).toMatch(/Connection refused/i);
+		const res = classifyFailure(["ConnectError: connect ECONNREFUSED 127.0.0.1:4000"]);
+		expect(res?.code).toBe("connection_refused");
+		expect(res?.text).toMatch(/Connection refused/i);
 	});
 
 	it("recognises rate limits (429)", () => {
-		const msg = classifyFailure(["Error 429: rate limit exceeded for model X"]);
-		expect(msg).toMatch(/Rate limited/i);
+		const res = classifyFailure(["Error 429: rate limit exceeded for model X"]);
+		expect(res?.code).toBe("rate_limited");
+		expect(res?.text).toMatch(/Rate limited/i);
 	});
 
 	it("returns undefined when nothing matches", () => {
 		expect(classifyFailure(["a totally benign log line"])).toBeUndefined();
 	});
 
+	// Reachability spot checks for each FailureReason code. Each string
+	// below must be covered by a real matcher in classifyFailure; if any
+	// future refactor collapses a matcher, these tests fail loudly.
+	it("covers all machine-visible ReasonCode values via matchers", () => {
+		const cases: Array<[string[], string]> = [
+			[["SSO session expired"], "provider_auth"],
+			[["429 too many requests: slow down"], "rate_limited"],
+			[["ECONNREFUSED 127.0.0.1:4000"], "connection_refused"],
+			[["ContextOverflowError: blah"], "context_overflow"],
+			[["ToolsNotSupportedError: blah"], "config_error"],
+		];
+		for (const [lines, expectedCode] of cases) {
+			const res = classifyFailure(lines);
+			expect(res?.code, `matcher missing for ${expectedCode}: input=${JSON.stringify(lines)}`).toBe(expectedCode);
+		}
+		// review_rejected comes from the report, not stderr
+		const rejected = classifyFailure([], {
+			outcome: "failed",
+			reviewRounds: 1,
+		} as ReturnType<typeof summarizeReport>);
+		expect(rejected?.code).toBe("review_rejected");
+	});
+
 	it("prefers report.error_message over stderr heuristics when both are present", () => {
-		const msg = classifyFailure(
+		const res = classifyFailure(
 			["401 Unauthorized: invalid API key"], // a stderr pattern we would otherwise match
 			{
 				outcome: "error",
 				errorMessage: "context window exceeded (typed)",
 			} as ReturnType<typeof summarizeReport>,
 		);
-		expect(msg).toMatch(/context window exceeded/i);
-		expect(msg).not.toMatch(/401/);
+		expect(res?.code).toBe("context_overflow");
+		expect(res?.text).toMatch(/context window exceeded/i);
+		expect(res?.text).not.toMatch(/401/);
 	});
 
 	it("classifies ContextOverflowError from the report", () => {
-		const msg = classifyFailure([], {
+		const res = classifyFailure([], {
 			outcome: "error",
 			errorMessage: "context window exceeded (inferred): foo",
 		} as ReturnType<typeof summarizeReport>);
-		expect(msg).toMatch(/context window exceeded/i);
+		expect(res?.code).toBe("context_overflow");
+		expect(res?.text).toMatch(/context window exceeded/i);
 	});
 
 	it("classifies ToolsNotSupportedError from the report", () => {
-		const msg = classifyFailure([], {
+		const res = classifyFailure([], {
 			outcome: "error",
 			errorMessage: "model does not support function calling: ...",
 		} as ReturnType<typeof summarizeReport>);
-		expect(msg).toMatch(/function calling/i);
+		expect(res?.code).toBe("config_error");
+		expect(res?.text).toMatch(/function calling/i);
 	});
 
 	it("classifies LifecycleError from the report", () => {
-		const msg = classifyFailure([], {
+		const res = classifyFailure([], {
 			outcome: "error",
 			errorMessage: "lifecycle exit hook failed: non-zero exit",
 		} as ReturnType<typeof summarizeReport>);
-		expect(msg).toMatch(/Lifecycle hook failed/i);
+		expect(res?.code).toBe("config_error");
+		expect(res?.text).toMatch(/Lifecycle hook failed/i);
 	});
 
 	it("falls back to stderr patterns for ContextOverflowError when report has no error_message", () => {
-		const msg = classifyFailure([
+		const res = classifyFailure([
 			"Error: ContextOverflowError: context window exceeded after retries",
 		]);
-		expect(msg).toMatch(/context window exceeded/i);
+		expect(res?.code).toBe("context_overflow");
+		expect(res?.text).toMatch(/context window exceeded/i);
 	});
 
 	it("falls back to stderr patterns for ToolsNotSupportedError", () => {
-		const msg = classifyFailure([
+		const res = classifyFailure([
 			"Error: ToolsNotSupportedError: model does not support chat completions with tools",
 		]);
-		expect(msg).toMatch(/function calling/i);
+		expect(res?.code).toBe("config_error");
+		expect(res?.text).toMatch(/function calling/i);
 	});
 });
 

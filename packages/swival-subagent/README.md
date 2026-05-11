@@ -288,6 +288,53 @@ Common failure modes get a one-line headline instead of a raw stderr dump:
   sizes (hundreds of KB) this will hit platform ARG_MAX. Keep bodies
   reasonable or split long guidance into a skills dir passed via
   `extraArgs`.
+- No git worktree isolation. Pi's built-in `subagent` tool supports
+  `worktree: true` to fan out parallel tasks into isolated git worktrees;
+  `swival-subagent` does not. Parallel tasks share the host working tree,
+  so they must not touch overlapping files. If isolation matters, dispatch
+  serially or use per-task `cwd` pointing at pre-created worktrees.
+- No async / runId / resume. Every dispatch is synchronous for the
+  lifetime of the tool call. There is no way to background a long-running
+  agent, check its status later, or reconnect to a live process — the
+  `pi subagent` extension offers this via `action: "status"` / `"resume"`
+  but this tool does not. Long runs must finish within the tool-call
+  window or be cancelled.
+- No retry-failed-subset helper. When some tasks in a parallel batch
+  fail, there is no built-in way to re-run just the failures. Caller must
+  inspect the result blocks, build a new `tasks[]` covering the failed
+  subset, and re-dispatch. The `artifactDir` path in each result block
+  points at the preserved `report.json` and trace JSONL so the caller can
+  read the exact failure cause before retrying.
+- `tasks[]` schema parity with pi's built-in `subagent` is partial. The
+  swival `TaskItem` supports `agent`, `task`, `cwd`, `output`,
+  `outputMode`, and `seed`. It does **not** support `reads` (pre-read
+  files into context), `progress` (progress.md tracking), `skill` (skill
+  injection), or `count` (repeat the same task N times). Unknown
+  properties are rejected at validation time rather than silently
+  dropped; call these out explicitly if you need them upstream.
+- Artifact retention. Each run writes `report.json` plus any trace JSONL
+  to `~/.pi/agent/swival-artifacts/<agent>-<ms-ts>-<rand>/`. Nothing
+  cleans these up; a heavy audit session can accumulate tens to hundreds
+  of MB. Until a `--keep-artifacts=N` policy lands, prune manually with a
+  `find ~/.pi/agent/swival-artifacts -mindepth 1 -maxdepth 1 -type d
+  -mtime +14 -exec rm -rf {} +` cron pass or equivalent.
+
+## Migrating from the v1 parallel format
+
+v2 changes the `content` string returned by parallel-mode dispatches:
+
+- v1 emitted `swival parallel: <ok>/<n> succeeded` followed by one
+  `[agent] <outcome>: <first line of output, truncated at 100 chars>`
+  line per task. Long outputs were silently lost.
+- v2 emits `swival parallel: <ok>/<n> ok` followed by per-task blocks
+  (`=== [i] <agent> (<status>[/<reason>], <turns>) ===`) with the full
+  finalOutput, error message on failures, artifact path, and optional
+  file-output metadata. Any caller that grep'd for the v1 header text
+  breaks. The trade is intentional — v1 lost data.
+
+If you need to pin the old format, stay on v1.0.0 of this package.
+Otherwise, migrate consumers to parse the `details.results[]` structure
+(stable) rather than regexing the human-readable `content` block.
 
 ## Running the tests
 

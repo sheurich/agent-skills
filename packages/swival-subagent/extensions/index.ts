@@ -38,9 +38,13 @@ import {
 } from "./agents.js";
 
 const MAX_PARALLEL_TASKS = 8;
-const MAX_CONCURRENCY = 4;
+const DEFAULT_CONCURRENCY = 4;
+const MAX_CONCURRENCY = 8;
 const STDERR_TAIL_LINES = 30;
 const STDOUT_TAIL_CHARS = 4000;
+// Artifacts are copied here before the per-run temp dir is deleted. Caller
+// sees report.json + trace JSONL under a timestamped subdir keyed by agent.
+const ARTIFACT_ROOT = path.join(os.homedir(), ".pi", "agent", "swival-artifacts");
 
 // -------------------------------------------------------------- helpers --
 
@@ -290,7 +294,43 @@ export interface TraceText {
 }
 export type TraceEvent = TraceToolCall | TraceText;
 
-interface SwivalResult {
+/**
+ * Short, stable machine code describing why a run *failed*. Separate from
+ * the lifecycle `status` field so callers can treat success and failure as
+ * orthogonal to the reason, and cleanly omit the reason on success.
+ */
+export type ReasonCode =
+	| "review_rejected"
+	| "max_turns"
+	| "provider_auth"
+	| "rate_limited"
+	| "context_overflow"
+	| "config_error"
+	| "connection_refused"
+	| "non_zero_exit"
+	| "unknown";
+
+/**
+ * Terminal state of a swival run. Distinct from ReasonCode because
+ * `completed` (ran without a reviewer) and `accepted` (reviewer approved)
+ * are both success states, whereas `rejected` (reviewer said no) and
+ * `failed` (non-zero exit) are both failure states with different origins.
+ * Collapsing any of these loses diagnostic information.
+ */
+export type RunStatus =
+	| "running"
+	| "accepted"
+	| "completed"
+	| "rejected"
+	| "failed"
+	| "error";
+
+export interface FailureReason {
+	code: ReasonCode;
+	text: string;
+}
+
+export interface SwivalResult {
 	agent: string;
 	agentSource: "user" | "project" | "unknown";
 	task: string;
@@ -300,8 +340,29 @@ interface SwivalResult {
 	durationMs: number;
 	report?: ReportSummary;
 	errorMessage?: string;
+	// Populated only on failure. Use `renderStatus(result)` for the terminal
+	// state; use `result.reason?.code` for a machine-readable failure cause.
+	reason?: FailureReason;
 	// Populated from --trace-dir JSONL when we can tail it.
 	traceEvents?: TraceEvent[];
+	// Path to the persisted artifact dir (`~/.pi/agent/swival-artifacts/<agent>-<ts>/`)
+	// containing the swival `report.json` and any `<sessionId>.jsonl` trace
+	// files we captured before tmpdir cleanup.
+	artifactDir?: string;
+	// Effective --max-turns value for this run (override or frontmatter).
+	// Undefined means swival's built-in default (100) was used. Surfaced
+	// in the header as "N/M turns" when a non-default limit was configured.
+	effectiveMaxTurns?: number;
+	// Set when the caller asked for per-task file output in parallel mode.
+	// `outputPath` is the absolute path we wrote finalOutput to; `outputMode`
+	// mirrors the TaskItem setting so consumers can decide whether to inline
+	// the body or just point at the file. `outputBytes` / `outputLineCount`
+	// are pre-computed so the summary can show size metadata without
+	// re-reading the file.
+	outputPath?: string;
+	outputMode?: "inline" | "file-only";
+	outputBytes?: number;
+	outputLineCount?: number;
 }
 
 interface SwivalDetails {
@@ -421,12 +482,15 @@ async function readReport(reportPath: string): Promise<ReportSummary | undefined
 export function classifyFailure(
 	stderrLines: readonly string[],
 	report?: ReportSummary,
-): string | undefined {
+): FailureReason | undefined {
 	// Review budget exhausted is usually success-from-swival-cli's POV (exit 0)
 	// but outcome=failed in the report. We surface it specifically so the
 	// caller knows *why* the run is marked failed rather than showing stderr.
 	if (report?.outcome === "failed" && typeof report.reviewRounds === "number" && report.reviewRounds > 0) {
-		return `Reviewer rejected after ${report.reviewRounds} round${report.reviewRounds === 1 ? "" : "s"}. See 'reviewer feedback' below.`;
+		return {
+			code: "review_rejected",
+			text: `Reviewer rejected after ${report.reviewRounds} round${report.reviewRounds === 1 ? "" : "s"}. See 'reviewer feedback' below.`,
+		};
 	}
 
 	// Prefer the authoritative error_message from the report when swival
@@ -436,43 +500,77 @@ export function classifyFailure(
 	const reportMsg = report?.errorMessage?.trim();
 	if (reportMsg) {
 		if (/context window exceeded|contextoverflow/i.test(reportMsg))
-			return `Context window exceeded — ${reportMsg}`;
+			return { code: "context_overflow", text: `Context window exceeded — ${reportMsg}` };
 		if (/does not support (?:chat completions with tools|function calling)|toolsnotsupported/i.test(reportMsg))
-			return `Model does not support function calling — ${reportMsg}`;
+			return { code: "config_error", text: `Model does not support function calling — ${reportMsg}` };
 		if (/lifecycle.*hook failed|lifecycleerror/i.test(reportMsg))
-			return `Lifecycle hook failed — ${reportMsg}`;
+			return { code: "config_error", text: `Lifecycle hook failed — ${reportMsg}` };
 		if (/configerror|unknown provider|invalid provider|agentfs binary not found/i.test(reportMsg))
-			return reportMsg;
-		return reportMsg;
+			return { code: "config_error", text: reportMsg };
+		return { code: "unknown", text: reportMsg };
 	}
 
 	const tail = stderrLines.slice(-50).join("\n");
 	const L = tail.toLowerCase();
 
 	if (/token has expired|sso session|sso.*expired|expired token/i.test(tail))
-		return "AWS SSO session expired — run `aws sso login` and retry.";
+		return { code: "provider_auth", text: "AWS SSO session expired — run `aws sso login` and retry." };
 	if (/unable to locate credentials|no credentials|credentialretrieval|expiredtoken/i.test(tail))
-		return "AWS credentials missing or expired.";
+		return { code: "provider_auth", text: "AWS credentials missing or expired." };
 	if (/401 unauthorized|invalid[_ -]?api[_ -]?key|authentication.*fail/i.test(tail))
-		return "LLM provider rejected the API key (401).";
-	if (/403 forbidden|accessdenied/i.test(tail)) return "LLM provider denied access (403).";
+		return { code: "provider_auth", text: "LLM provider rejected the API key (401)." };
+	if (/403 forbidden|accessdenied/i.test(tail))
+		return { code: "provider_auth", text: "LLM provider denied access (403)." };
 	if (/429 too many requests|rate limit|ratelimit/i.test(tail))
-		return "Rate limited by the LLM provider (429). Retry after backoff.";
+		return { code: "rate_limited", text: "Rate limited by the LLM provider (429). Retry after backoff." };
 	if (/econnrefused|connection refused/i.test(tail))
-		return "Connection refused — is the LLM proxy / MLX server running?";
+		return { code: "connection_refused", text: "Connection refused — is the LLM proxy / MLX server running?" };
 	if (/enotfound|name or service not known|dns/i.test(L) && /proxy|api|model/.test(L))
-		return "DNS lookup failed for the LLM endpoint.";
+		return { code: "connection_refused", text: "DNS lookup failed for the LLM endpoint." };
 	if (/context window exceeded|contextoverflowerror/i.test(tail))
-		return "Context window exceeded (swival could not recover after truncation retries).";
+		return {
+			code: "context_overflow",
+			text: "Context window exceeded (swival could not recover after truncation retries).",
+		};
 	if (/toolsnotsupportederror|does not support function calling|does not support chat completions with tools/i.test(tail))
-		return "Model does not support function calling.";
+		return { code: "config_error", text: "Model does not support function calling." };
 	if (/lifecycleerror|lifecycle.*hook failed/i.test(tail))
-		return "Lifecycle hook failed (fail-closed mode).";
+		return { code: "config_error", text: "Lifecycle hook failed (fail-closed mode)." };
 	if (/configerror|unknown provider|invalid provider|agentfs binary not found/i.test(tail))
-		return tail.split("\n").filter((l) => l.trim()).slice(-1)[0] ?? "swival config error.";
+		return {
+			code: "config_error",
+			text: tail.split("\n").filter((l) => l.trim()).slice(-1)[0] ?? "swival config error.",
+		};
 	if (/e2big|argument list too long|exec.*failed/i.test(tail))
-		return "System prompt too large (ARG_MAX). Trim the agent body or move content into skills.";
+		return {
+			code: "config_error",
+			text: "System prompt too large (ARG_MAX). Trim the agent body or move content into skills.",
+		};
 	return undefined;
+}
+
+/**
+ * Compute the human-readable errorMessage surfaced on a failing run.
+ *
+ * Extracted from `runSingleSwival` so the fallback chain is unit-testable.
+ * Regression guard: the previous implementation used `??` (nullish
+ * coalescing) in the fallback chain, which let empty strings pass through
+ * as a "defined" value — producing an empty errorMessage on credential
+ * expiry where classifyFailure returned undefined and stderr was empty.
+ * `||` plus explicit empty filtering is what we want here.
+ */
+export function computeErrorMessage(args: {
+	classifiedText: string | undefined;
+	stderrTail: string;
+	exitCode: number;
+	outcome: string | undefined;
+}): string | undefined {
+	const { classifiedText, stderrTail, exitCode, outcome } = args;
+	const fallback =
+		exitCode !== 0
+			? `swival exited ${exitCode}`
+			: `swival reported outcome=${outcome ?? "unknown"}`;
+	return (classifiedText || "").trim() || stderrTail.trim() || fallback;
 }
 
 // ---------------------------------------------------- trace tailing --
@@ -624,6 +722,86 @@ export function startTraceTail(
 		fileWatcher?.close();
 		await consume();
 	};
+}
+
+// ---------------------------------------------------- artifact persist --
+
+/**
+ * Copy swival's `report.json` and any `<sessionId>.jsonl` trace files from
+ * the per-run tmp dir into `~/.pi/agent/swival-artifacts/<agent>-<ts>/`
+ * so they outlive the `rm(tmpDir)` call in `runSingleSwival`.
+ *
+ * Returns the artifact dir path on success, or undefined if we captured
+ * nothing (no report and no trace files — unusual but possible if swival
+ * crashed before it could write anything). Best-effort: individual copy
+ * errors are swallowed so cleanup always runs.
+ */
+export async function persistArtifacts(
+	tmpDir: string,
+	agentName: string,
+	artifactRoot: string = ARTIFACT_ROOT,
+	now: Date = new Date(),
+): Promise<string | undefined> {
+	const ts = now
+		.toISOString()
+		.replace(/[:.\-]/g, "")
+		.replace(/Z$/, "Z");
+	// Allow only filename-safe characters and collapse leading/inner ".." so
+	// a hostile agent name can't escape artifactRoot via path traversal.
+	const safeAgent =
+		agentName
+			.replace(/[^a-zA-Z0-9._-]/g, "_")
+			.replace(/\.+/g, ".")
+			.replace(/^[._-]+/, "") || "swival";
+	const suffix = Math.random().toString(36).slice(2, 8);
+	const destDir = path.join(artifactRoot, `${safeAgent}-${ts}-${suffix}`);
+
+	let captured = false;
+	try {
+		await fs.promises.mkdir(destDir, { recursive: true });
+	} catch {
+		return undefined;
+	}
+
+	// report.json — top-level of tmpDir.
+	const reportSrc = path.join(tmpDir, "report.json");
+	try {
+		await fs.promises.copyFile(reportSrc, path.join(destDir, "report.json"));
+		captured = true;
+	} catch {
+		/* no report written */
+	}
+
+	// trace/*.jsonl — every file swival wrote (usually one <sessionId>.jsonl).
+	const traceSrc = path.join(tmpDir, "trace");
+	try {
+		const entries = await fs.promises.readdir(traceSrc);
+		if (entries.length > 0) {
+			const destTrace = path.join(destDir, "trace");
+			await fs.promises.mkdir(destTrace, { recursive: true });
+			for (const name of entries) {
+				try {
+					await fs.promises.copyFile(path.join(traceSrc, name), path.join(destTrace, name));
+					captured = true;
+				} catch {
+					/* skip unreadable entries */
+				}
+			}
+		}
+	} catch {
+		/* trace dir never populated */
+	}
+
+	if (!captured) {
+		// Nothing to keep; clean up the empty dir we just made.
+		try {
+			await fs.promises.rm(destDir, { recursive: true, force: true });
+		} catch {
+			/* ignore */
+		}
+		return undefined;
+	}
+	return destDir;
 }
 
 // ---------------------------------------------------------- run single --
@@ -804,15 +982,46 @@ async function runSingleSwival(
 			current.finalOutput = stdoutBuf.trim();
 		}
 
-		if (isRunFailure(current) && !current.errorMessage) {
-			// Prefer the classified headline, fall back to stderr tail.
-			current.errorMessage =
-				classifyFailure(stderrLines, current.report) ??
-				stderrLines.slice(-5).join("\n") ??
-				(current.exitCode !== 0
-					? `swival exited ${current.exitCode}`
-					: `swival reported outcome=${current.report?.outcome ?? "unknown"}`);
+		// Persist artifacts BEFORE the finally-block removes tmpDir. Callers
+		// expect report.json and <session>.jsonl to outlive the run so failure
+		// diagnosis has source material to point at.
+		try {
+			current.artifactDir = await persistArtifacts(tmpDir, agent.name);
+		} catch {
+			/* best-effort; skip artifact persistence on error */
 		}
+
+		// Surface the configured maxTurns (override > frontmatter). Swival's
+		// built-in default is 100; we only flag explicitly-set limits.
+		const configuredMaxTurns = overrides.maxTurns ?? agent.maxTurns;
+		if (configuredMaxTurns !== undefined) current.effectiveMaxTurns = configuredMaxTurns;
+
+		if (isRunFailure(current)) {
+			const classified = classifyFailure(stderrLines, current.report);
+			// `filter(Boolean)` here is defensive — upstream split already drops
+			// whitespace-only lines before they enter stderrLines, so this can't
+			// collapse multi-line errors that contain intentional blanks.
+			const stderrTail = stderrLines.filter(Boolean).slice(-5).join("\n");
+			if (!current.errorMessage) {
+				current.errorMessage = computeErrorMessage({
+					classifiedText: classified?.text,
+					stderrTail,
+					exitCode: current.exitCode,
+					outcome: current.report?.outcome,
+				});
+			}
+			if (classified) {
+				current.reason = classified;
+			} else {
+				current.reason = {
+					code: current.exitCode !== 0 ? "non_zero_exit" : "unknown",
+					text: current.errorMessage ?? "",
+				};
+			}
+		}
+		// Success states (accepted / completed) leave `reason` undefined on
+		// purpose — status + reason are orthogonal, and the failure-only shape
+		// lets callers cleanly guard on `if (r.reason) { ...retry logic... }`.
 		return current;
 	} finally {
 		// Stop tailing and flush one more time before cleanup.
@@ -832,7 +1041,7 @@ async function runSingleSwival(
 
 // ---------------------------------------------------------- concurrency --
 
-async function mapWithConcurrency<TIn, TOut>(
+export async function mapWithConcurrency<TIn, TOut>(
 	items: TIn[],
 	concurrency: number,
 	fn: (item: TIn, index: number) => Promise<TOut>,
@@ -854,17 +1063,38 @@ async function mapWithConcurrency<TIn, TOut>(
 
 // ------------------------------------------------------- tool registry --
 
-const TaskItem = Type.Object({
-	agent: Type.String({ description: "Swival agent name" }),
-	task: Type.String({ description: "Task to delegate" }),
-	cwd: Type.Optional(Type.String({ description: "Working directory for the swival process" })),
-});
+export const TaskItem = Type.Object(
+	{
+		agent: Type.String({ description: "Swival agent name" }),
+		task: Type.String({ description: "Task to delegate" }),
+		cwd: Type.Optional(Type.String({ description: "Working directory for the swival process" })),
+		output: Type.Optional(
+			Type.String({
+				description:
+					"File path to write this task's finalOutput to. Relative paths resolve against the task's cwd (or the tool cwd). When set, the tool-response content defaults to file-only metadata (path + size) instead of inlining the body — set outputMode=\"inline\" to also receive the body inline.",
+			}),
+		),
+		outputMode: Type.Optional(
+			StringEnum(["inline", "file-only"] as const, {
+				description:
+					"How to surface the task's output in the tool-response content. Default when output is set is file-only (path + size metadata, no body). Set inline to inline the body even when writing to a file. Ignored when output is not set (body is always inlined in that case).",
+			}),
+		),
+		seed: Type.Optional(Type.Number({ description: "Override --seed for this task only." })),
+	},
+	{ additionalProperties: false },
+);
 
-const ChainItem = Type.Object({
-	agent: Type.String({ description: "Swival agent name" }),
-	task: Type.String({ description: "Task with optional {previous} placeholder for prior step's output" }),
-	cwd: Type.Optional(Type.String({ description: "Working directory for the swival process" })),
-});
+export const ChainItem = Type.Object(
+	{
+		agent: Type.String({ description: "Swival agent name" }),
+		task: Type.String({
+			description: "Task with optional {previous} placeholder for prior step's output",
+		}),
+		cwd: Type.Optional(Type.String({ description: "Working directory for the swival process" })),
+	},
+	{ additionalProperties: false },
+);
 
 const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
 	description: 'Which swival-agents directories to use. Default: "user".',
@@ -919,7 +1149,12 @@ const SwivalParams = Type.Object({
 	maxReviewRoundsOverride: Type.Optional(
 		Type.Number({ description: "Override --max-review-rounds for this call." }),
 	),
-	maxTurnsOverride: Type.Optional(Type.Number({ description: "Override --max-turns for this call." })),
+	maxTurnsOverride: Type.Optional(
+		Type.Number({
+			description:
+				"Override --max-turns for this call. Swival's default is 100 turns; lower this to bound runtime, raise for sweep-style refactors.",
+		}),
+	),
 	maxOutputTokensOverride: Type.Optional(
 		Type.Number({ description: "Override --max-output-tokens for this call." }),
 	),
@@ -936,6 +1171,20 @@ const SwivalParams = Type.Object({
 	),
 	encryptSecretsOverride: Type.Optional(
 		Type.Boolean({ description: "Override --encrypt-secrets for this call." }),
+	),
+	concurrency: Type.Optional(
+		Type.Number({
+			minimum: 1,
+			maximum: MAX_CONCURRENCY,
+			description: `Parallel-mode only: max concurrent tasks. Default 4, max ${MAX_CONCURRENCY}.`,
+		}),
+	),
+	maxInlineBytes: Type.Optional(
+		Type.Number({
+			minimum: 1,
+			description:
+				"Parallel-mode only: cap on bytes of a single task's finalOutput inlined into the tool-response content. When a task exceeds the cap, the block shows the first maxInlineBytes followed by a loud [truncated N bytes; full output at <artifactDir>] marker. Omit (default) to inline the full output — silent truncation is never the default. To avoid token growth entirely, pass per-task `output: \"...\"` paths instead.",
+		}),
 	),
 });
 
@@ -963,13 +1212,41 @@ function buildOverridesFromParams(params: Record<string, unknown>): SwivalOverri
 	};
 }
 
-function renderOutcome(r: SwivalResult): string {
+/**
+ * Render the terminal status of a run. Preserves four distinct success/
+ * failure states so the caller can tell:
+ *   - accepted:  reviewer approved (review_rounds ≥ 1, outcome=success)
+ *   - completed: ran without a reviewer to natural success (review_rounds=0)
+ *   - rejected:  reviewer said no (outcome=failed, exit=0)
+ *   - failed:    non-zero exit (swival itself crashed or was killed)
+ *   - error:     internal AgentError subclass (outcome=error)
+ *
+ * This is not the same as `reason.code` — a `rejected` run has
+ * `reason.code = "review_rejected"`, a `failed` run may have any of
+ * `provider_auth`, `non_zero_exit`, etc. Status is lifecycle; reason is
+ * cause.
+ */
+export function renderStatus(r: SwivalResult): RunStatus {
 	if (r.exitCode === -1) return "running";
 	if (r.exitCode !== 0) return "failed";
-	if (r.report?.outcome === "success") return "accepted";
-	if (r.report?.outcome === "failed") return "rejected";
 	if (r.report?.outcome === "error") return "error";
+	if (r.report?.outcome === "failed") return "rejected";
+	if (r.report?.outcome === "success") {
+		const rounds = r.report.reviewRounds ?? 0;
+		return rounds > 0 ? "accepted" : "completed";
+	}
+	// exit=0 with no or unknown report: the run didn't fail, but we can't
+	// confirm a reviewer approved it. Treat as "completed" (ran to end).
 	return "completed";
+}
+
+/**
+ * Backwards-compatible alias. Deprecated in favor of `renderStatus` — the
+ * name implied "outcome" (the report field) but the function returns the
+ * broader lifecycle state.
+ */
+function renderOutcome(r: SwivalResult): string {
+	return renderStatus(r);
 }
 
 function formatDuration(ms: number): string {
@@ -1000,6 +1277,101 @@ function buildHeaderMeta(r: SwivalResult): string {
 	if (r.durationMs) parts.push(formatDuration(r.durationMs));
 	parts.push(renderOutcome(r));
 	return parts.join(" · ");
+}
+
+/**
+ * Render the full per-task summary for parallel mode.
+ *
+ * Output routing (from the reviewer's feedback on the v1 patch):
+ *   - r.outputPath set AND r.outputMode !== "inline": emit file-only
+ *     metadata (path, line count, byte size). Body stays in the file,
+ *     not in the tool-response content — saves tokens for audit-style
+ *     jobs that produce 50–200 KB reports.
+ *   - r.outputPath set AND r.outputMode === "inline": write to file AND
+ *     inline the body (caller wants both).
+ *   - no outputPath: inline the full finalOutput. No default cap; hardcoding
+ *     one just reproduces the original silent-truncation defect at a bigger
+ *     scale. Callers who need a hard bound set maxInlineBytes explicitly.
+ *
+ * Truncation is always loud: when maxInlineBytes causes a cut, the block
+ * carries `[truncated N bytes; full output at <artifactDir>]` so the caller
+ * can read the full answer from the persisted report.
+ *
+ * Header shape distinguishes reviewer-approved from ran-without-reviewer:
+ *   === [i] <agent> (<status>[/reason], [effTurns/]N turns) ===
+ * where <status> ∈ {accepted, completed, rejected, failed, error} and
+ * <reason> ∈ ReasonCode (failures only).
+ *
+ * Aggregate header uses neutral "M/N ok" vocabulary (not "succeeded" or
+ * "accepted") because an ok batch can mix accepted + completed runs.
+ */
+export function buildParallelSummary(
+	results: readonly SwivalResult[],
+	opts: { maxInlineBytes?: number } = {},
+): string {
+	const cap = opts.maxInlineBytes;
+	const ok = results.filter((r) => !isRunFailure(r)).length;
+	const header = `swival parallel: ${ok}/${results.length} ok`;
+
+	const blocks = results.map((r, i) => {
+		const status = renderStatus(r);
+		const statusLabel =
+			isRunFailure(r) && r.reason ? `${status}/${r.reason.code}` : status;
+		const turns = r.report?.turns;
+		const maxTurns = r.effectiveMaxTurns;
+		let turnsLabel = "";
+		if (typeof turns === "number" && turns > 0) {
+			if (typeof maxTurns === "number" && maxTurns > 0) {
+				turnsLabel = `, ${turns}/${maxTurns} turns`;
+			} else {
+				turnsLabel = `, ${turns} turn${turns === 1 ? "" : "s"}`;
+			}
+		}
+		const titleLine = `=== [${i}] ${r.agent} (${statusLabel}${turnsLabel}) ===`;
+
+		const lines: string[] = [titleLine];
+		if (isRunFailure(r) && r.errorMessage) {
+			lines.push(`error: ${r.errorMessage.replace(/\n/g, " ").trim()}`);
+		}
+		if (r.artifactDir) {
+			lines.push(`artifacts: ${r.artifactDir}`);
+		}
+
+		const hasOutputFile = Boolean(r.outputPath);
+		const fileOnly = hasOutputFile && r.outputMode !== "inline";
+
+		if (fileOnly) {
+			const meta: string[] = [];
+			if (typeof r.outputLineCount === "number")
+				meta.push(`${r.outputLineCount} line${r.outputLineCount === 1 ? "" : "s"}`);
+			if (typeof r.outputBytes === "number") meta.push(`${r.outputBytes} bytes`);
+			const metaStr = meta.length > 0 ? ` (${meta.join(", ")})` : "";
+			lines.push("");
+			lines.push(`→ ${r.outputPath}${metaStr}`);
+		} else if (!isRunFailure(r)) {
+			if (hasOutputFile) {
+				lines.push(`output file: ${r.outputPath}`);
+			}
+			const body = r.finalOutput ?? "";
+			if (body.length > 0) {
+				lines.push("");
+				if (typeof cap === "number" && cap > 0 && body.length > cap) {
+					const cut = body.length - cap;
+					lines.push(body.slice(0, cap));
+					const pointer = r.artifactDir ?? r.outputPath ?? "report.json";
+					lines.push(`[truncated ${cut} bytes; full output at ${pointer}]`);
+				} else {
+					lines.push(body);
+				}
+			}
+		}
+		// Failed tasks omit the finalOutput body: mid-run stdout for a
+		// failed run is usually interrupted narration. The full text (if
+		// any) sits in artifactDir/report.json for the caller to read.
+		return lines.join("\n");
+	});
+
+	return [header, "", ...blocks].join("\n");
 }
 
 export default function (pi: ExtensionAPI) {
@@ -1195,14 +1567,21 @@ export default function (pi: ExtensionAPI) {
 					});
 				};
 
-				const results = await mapWithConcurrency(params.tasks, MAX_CONCURRENCY, async (t, idx) => {
+				const requestedConcurrency = params.concurrency ?? DEFAULT_CONCURRENCY;
+				const concurrency = Math.max(1, Math.min(MAX_CONCURRENCY, requestedConcurrency));
+
+				const results = await mapWithConcurrency(params.tasks, concurrency, async (t, idx) => {
+					// Per-task seed outranks the shared override so callers can
+					// seed each task independently for reproducibility.
+					const perTaskOverrides: SwivalOverrides =
+						t.seed !== undefined ? { ...overrides, seed: t.seed } : overrides;
 					const r = await runSingleSwival(
 						ctx.cwd,
 						agents,
 						t.agent,
 						t.task,
 						t.cwd,
-						overrides,
+						perTaskOverrides,
 						signal,
 						(partial) => {
 							if (partial.details?.results[0]) {
@@ -1212,17 +1591,43 @@ export default function (pi: ExtensionAPI) {
 						},
 						makeDetails("parallel"),
 					);
+					// Persist per-task output to a file when requested. The path
+					// resolves relative to the task's cwd (or the tool cwd) so
+					// caller-supplied relative paths behave like shell redirections.
+					if (t.output) {
+						const resolveBase = t.cwd ?? params.cwd ?? ctx.cwd;
+						const outPath = path.isAbsolute(t.output) ? t.output : path.resolve(resolveBase, t.output);
+						try {
+							await fs.promises.mkdir(path.dirname(outPath), { recursive: true });
+							const body = r.finalOutput ?? "";
+							await fs.promises.writeFile(outPath, body, "utf-8");
+							r.outputPath = outPath;
+							// Default to file-only when the caller requested output to a
+							// path. The common case for this flag is "I'll read the file
+							// next turn" — inlining a 50 KB audit report into the tool
+							// response wastes tokens. Opt back in with outputMode="inline".
+							r.outputMode = t.outputMode ?? "file-only";
+							r.outputBytes = Buffer.byteLength(body, "utf-8");
+							r.outputLineCount = body === "" ? 0 : body.split("\n").length;
+						} catch (err) {
+							const msg = err instanceof Error ? err.message : String(err);
+							r.stderrTail = [...r.stderrTail, `failed to write output to ${outPath}: ${msg}`];
+						}
+					}
 					placeholders[idx] = r;
 					emitParallel();
 					return r;
 				});
 
-				const ok = results.filter((r) => !isRunFailure(r)).length;
-				const summary = results
-					.map((r) => `[${r.agent}] ${renderOutcome(r)}: ${r.finalOutput.split("\n")[0].slice(0, 100)}`)
-					.join("\n");
 				return {
-					content: [{ type: "text", text: `swival parallel: ${ok}/${results.length} succeeded\n\n${summary}` }],
+					content: [
+						{
+							type: "text",
+							text: buildParallelSummary(results, {
+								maxInlineBytes: params.maxInlineBytes,
+							}),
+						},
+					],
 					details: makeDetails("parallel")(results),
 				};
 			}
