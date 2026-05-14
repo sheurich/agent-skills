@@ -22,12 +22,12 @@ description: >-
 
 ## When NOT to Use
 
-- [Scenario where this doesn't apply]
+- [Scenario where this does not apply]
 - [Better alternative for related but different problem]
 
 ## Problem
 
-[Clear description of what this solves and why it's non-obvious]
+[Clear description of what this solves and why it is non-obvious]
 
 ## Solution
 
@@ -43,6 +43,25 @@ description: >-
 
 1. [How to confirm it worked]
 2. [Expected outcome]
+
+## Evaluation artifacts
+
+Format: [single-page HTML preferred; see format preference list below]
+Path:   `/tmp/[kebab-case-name]-$(date +%Y%m%d).html`
+Open:   `open /tmp/[kebab-case-name]-$(date +%Y%m%d).html`  # macOS
+        `xdg-open /tmp/[kebab-case-name]-$(date +%Y%m%d).html`  # Linux
+
+[Required when the skill produces output a human must review before acting.
+Omit this section for skills with no reviewable output.
+
+Format preference (highest to lowest):
+1. Single-page HTML - tables, hyperlinks, self-contained, copy-paste ready
+2. Structured Markdown with embedded images
+3. Plain Markdown
+4. Terminal text (last resort)
+
+Emit the artifact before presenting findings.
+Print the open command appropriate for the reviewer's OS.]
 
 ## References
 
@@ -63,3 +82,4 @@ Before saving, verify:
 - [ ] Solution has concrete steps
 - [ ] No hardcoded user paths (`/Users/...`, `/home/...`)
 - [ ] Under 500 lines total
+- [ ] Evaluation artifacts section present if the skill produces reviewable output
