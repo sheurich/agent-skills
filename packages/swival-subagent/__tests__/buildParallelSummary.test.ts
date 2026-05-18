@@ -132,7 +132,7 @@ describe("buildParallelSummary", () => {
 	it("applies maxInlineBytes as a loud cap when the caller sets one", () => {
 		const big = "x".repeat(50_000);
 		const summary = buildParallelSummary([makeResult({ finalOutput: big })], { maxInlineBytes: 1024 });
-		expect(summary).toMatch(/\[truncated \d+ bytes; full output at/);
+		expect(summary).toMatch(/\[truncated \d+ chars; full output at/);
 		expect(summary.length).toBeLessThan(2_000);
 	});
 

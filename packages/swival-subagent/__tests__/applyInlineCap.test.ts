@@ -33,7 +33,7 @@ describe("applyInlineCap", () => {
 		it("truncates body and appends marker without pointer", () => {
 			const body = "abcdefghij"; // 10 chars
 			const result = applyInlineCap(body, 5, undefined);
-			expect(result).toBe("abcde\n[truncated 5 bytes]");
+			expect(result).toBe("abcde\n[truncated 5 chars]");
 		});
 
 		it("truncated prefix length equals cap", () => {
@@ -47,14 +47,14 @@ describe("applyInlineCap", () => {
 		it("marker contains pointer when pointer is supplied", () => {
 			const body = "abcdefghij"; // 10 chars
 			const result = applyInlineCap(body, 5, "/tmp/artifacts");
-			expect(result).toBe("abcde\n[truncated 5 bytes; full output at /tmp/artifacts]");
+			expect(result).toBe("abcde\n[truncated 5 chars; full output at /tmp/artifacts]");
 		});
 
 		it("marker omits pointer when pointer is undefined", () => {
 			const body = "abcdefghij"; // 10 chars
 			const result = applyInlineCap(body, 5, undefined);
 			expect(result).not.toContain("full output at");
-			expect(result).toContain("[truncated 5 bytes]");
+			expect(result).toContain("[truncated 5 chars]");
 		});
 
 		it("cut count reflects characters removed", () => {
@@ -62,13 +62,13 @@ describe("applyInlineCap", () => {
 			const cap = 50;
 			const cut = body.length - cap;
 			const result = applyInlineCap(body, cap, undefined);
-			expect(result).toContain(`[truncated ${cut} bytes]`);
+			expect(result).toContain(`[truncated ${cut} chars]`);
 		});
 
 		it("handles body of exactly cap+1 chars", () => {
 			const body = "a".repeat(11);
 			const result = applyInlineCap(body, 10, "dir/out");
-			expect(result).toBe("aaaaaaaaaa\n[truncated 1 bytes; full output at dir/out]");
+			expect(result).toBe("aaaaaaaaaa\n[truncated 1 chars; full output at dir/out]");
 		});
 	});
 });

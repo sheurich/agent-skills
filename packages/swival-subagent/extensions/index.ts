@@ -43,10 +43,11 @@ const DEFAULT_CONCURRENCY = 4;
 // Maximum worker pool size used by mapWithConcurrency.
 const MAX_CONCURRENCY = 8;
 const STDERR_TAIL_LINES = 30;
-/** Ring-buffer size for stdout accumulation. 256 KB is comfortably above any
- * expected answer length; the ring prevents unbounded growth on chatty agents.
+/** Ring-buffer cap for stdout accumulation (in UTF-16 code units, i.e.
+ * JavaScript string .length). 256 K chars is comfortably above any expected
+ * answer length; the ring prevents unbounded growth on chatty agents.
  */
-const STDOUT_RING_BYTES = 256 * 1024;
+const STDOUT_RING_CHARS = 256 * 1024;
 // Artifacts are copied here before the per-run temp dir is deleted. Caller
 // sees report.json + trace JSONL under a timestamped subdir keyed by agent.
 const ARTIFACT_ROOT = path.join(os.homedir(), ".pi", "agent", "swival-artifacts");
@@ -75,7 +76,7 @@ function tail<T>(arr: T[], n: number): T[] {
 export function applyInlineCap(body: string, cap: number | undefined, pointer: string | undefined): string {
 	if (typeof cap !== "number" || cap <= 0 || body.length <= cap) return body;
 	const cut = body.length - cap;
-	const tail = pointer ? `\n[truncated ${cut} bytes; full output at ${pointer}]` : `\n[truncated ${cut} bytes]`;
+	const tail = pointer ? `\n[truncated ${cut} chars; full output at ${pointer}]` : `\n[truncated ${cut} chars]`;
 	return body.slice(0, cap) + tail;
 }
 
@@ -989,8 +990,8 @@ async function runSingleSwival(
 
 			proc.stdout.on("data", (buf: Buffer) => {
 				stdoutBuf += stdoutDecoder.decode(buf, { stream: true });
-				if (stdoutBuf.length > STDOUT_RING_BYTES) {
-					stdoutBuf = stdoutBuf.slice(-STDOUT_RING_BYTES);
+				if (stdoutBuf.length > STDOUT_RING_CHARS) {
+					stdoutBuf = stdoutBuf.slice(-STDOUT_RING_CHARS);
 				}
 				current.finalOutput = stdoutBuf;
 				scheduleEmit();
@@ -1070,7 +1071,7 @@ async function runSingleSwival(
 
 		// Prefer result.answer from the report JSON as the authoritative final
 		// output. Swival streams the answer to stdout too, but our 256 KB stdout
-		// ring-buffer (STDOUT_RING_BYTES) silently truncates long answers.
+		// ring-buffer (STDOUT_RING_CHARS) silently truncates long answers.
 		// The report JSON carries the complete, un-truncated answer.
 		if (current.report?.answer && current.report.answer.trim()) {
 			current.finalOutput = current.report.answer.trim();
@@ -1283,7 +1284,7 @@ const SwivalParams = Type.Object({
 		Type.Number({
 			minimum: 1,
 			description:
-				"Parallel-mode only: cap on bytes of a single task's finalOutput inlined into the tool-response content. When a task exceeds the cap, the block shows the first maxInlineBytes followed by a loud [truncated N bytes; full output at <artifactDir>] marker. Omit (default) to inline the full output — silent truncation is never the default. To avoid token growth entirely, pass per-task `output: \"...\"` paths instead.",
+				"Cap (in characters) on a task's finalOutput inlined into the tool-response content. Applies to single, chain, and parallel modes. When output exceeds the cap, the response shows the first maxInlineBytes characters followed by a [truncated N chars; full output at <artifactDir>] marker. Omit (default) to inline the full output — silent truncation is never the default. To avoid token growth entirely, pass `output: \"...\"` paths instead.",
 		}),
 	),
 	output: Type.Optional(Type.String({ description: "Single/chain mode: file path to write the run's finalOutput to. Relative paths resolve against cwd. When set, the tool-response content defaults to file-only metadata (path + size) instead of inlining the body — set outputMode=\"inline\" to also receive the body inline." })),
@@ -1398,7 +1399,7 @@ function buildHeaderMeta(r: SwivalResult): string {
  *     scale. Callers who need a hard bound set maxInlineBytes explicitly.
  *
  * Truncation is always loud: when maxInlineBytes causes a cut, the block
- * carries `[truncated N bytes; full output at <artifactDir>]` so the caller
+ * carries `[truncated N chars; full output at <artifactDir>]` so the caller
  * can read the full answer from the persisted report.
  *
  * Header shape distinguishes reviewer-approved from ran-without-reviewer:
@@ -1617,6 +1618,11 @@ export default function (pi: ExtensionAPI) {
 				results.push(r);
 
 					if (isRunFailure(r)) {
+					const stepOutput = step.output ?? params.output;
+					if (stepOutput) {
+						const resolveBase = step.cwd ?? params.cwd ?? ctx.cwd;
+						await writeRunOutput(r, stepOutput, step.outputMode ?? params.outputMode, resolveBase);
+					}
 					const partial = r.finalOutput?.trim();
 					const headline = `swival chain stopped at step ${i + 1} (${step.agent}): ${r.errorMessage ?? "(no message)"}`;
 					const text = partial
@@ -1749,6 +1755,9 @@ export default function (pi: ExtensionAPI) {
 			);
 			const isError = isRunFailure(result);
 			if (isError) {
+				if (params.output) {
+					await writeRunOutput(result, params.output, params.outputMode, params.cwd ?? ctx.cwd);
+				}
 				return {
 					content: [
 						{

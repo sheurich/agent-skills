@@ -52,9 +52,22 @@ else
 fi
 
 # The extension imports from @mariozechner/* — symlink regardless of actual scope.
-for pkg in pi-ai pi-agent-core pi-tui; do
+for pkg in pi-ai pi-agent-core; do
 	ln -sfn "${PI_PKG}/node_modules/${PI_SCOPE}/${pkg}" "node_modules/@mariozechner/${pkg}"
 done
+
+# pi-tui may live under pi-coding-agent or as a sibling top-level package.
+PI_TUI="${PI_PKG}/node_modules/${PI_SCOPE}/pi-tui"
+if [[ ! -d "$PI_TUI" ]]; then
+	# Try sibling install (e.g. /opt/homebrew/lib/node_modules/@earendil-works/pi-tui)
+	PI_TUI="$(dirname "$PI_PKG")/pi-tui"
+fi
+if [[ -d "$PI_TUI" ]]; then
+	ln -sfn "$PI_TUI" "node_modules/@mariozechner/pi-tui"
+else
+	echo "warning: could not locate pi-tui; tests importing TUI types will fail." >&2
+fi
+
 ln -sfn "$PI_PKG" node_modules/@mariozechner/pi-coding-agent
 ln -sfn "${PI_PKG}/node_modules/typebox" node_modules/typebox
 
