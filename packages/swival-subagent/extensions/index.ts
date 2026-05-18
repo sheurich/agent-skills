@@ -37,11 +37,16 @@ import {
 	type SwivalAgentConfig,
 } from "./agents.js";
 
+// Maximum array size of tasks[] and chain[] params.
 const MAX_PARALLEL_TASKS = 8;
 const DEFAULT_CONCURRENCY = 4;
+// Maximum worker pool size used by mapWithConcurrency.
 const MAX_CONCURRENCY = 8;
 const STDERR_TAIL_LINES = 30;
-const STDOUT_TAIL_CHARS = 4000;
+/** Ring-buffer size for stdout accumulation. 256 KB is comfortably above any
+ * expected answer length; the ring prevents unbounded growth on chatty agents.
+ */
+const STDOUT_RING_BYTES = 256 * 1024;
 // Artifacts are copied here before the per-run temp dir is deleted. Caller
 // sees report.json + trace JSONL under a timestamped subdir keyed by agent.
 const ARTIFACT_ROOT = path.join(os.homedir(), ".pi", "agent", "swival-artifacts");
@@ -55,6 +60,53 @@ function stripAnsi(s: string): string {
 
 function tail<T>(arr: T[], n: number): T[] {
 	return arr.length > n ? arr.slice(arr.length - n) : arr;
+}
+
+/**
+ * Truncate inline body when caller-supplied cap is exceeded. Used in single,
+ * chain, and parallel result paths so a 200 KB answer doesn't flood Pi's
+ * tool-response content. Truncation is loud — the marker points the caller
+ * at where the full answer lives (artifact dir, output file).
+ *
+ * Char-length cap, not byte cap: TypeScript string slicing is by UTF-16 code
+ * unit, not bytes. The marker counts characters too. This matches what
+ * buildParallelSummary did pre-extraction; do not change semantics.
+ */
+export function applyInlineCap(body: string, cap: number | undefined, pointer: string | undefined): string {
+	if (typeof cap !== "number" || cap <= 0 || body.length <= cap) return body;
+	const cut = body.length - cap;
+	const tail = pointer ? `\n[truncated ${cut} bytes; full output at ${pointer}]` : `\n[truncated ${cut} bytes]`;
+	return body.slice(0, cap) + tail;
+}
+
+/**
+ * Write a run's finalOutput to disk and populate the output bookkeeping
+ * fields on the result. Mirrors the inline block previously used in parallel
+ * mode. Caller is responsible for picking the cwd anchor for relative paths.
+ *
+ * On error (mkdir / write failure) the caller's stderrTail is appended; the
+ * function does not throw.
+ */
+async function writeRunOutput(
+	r: SwivalResult,
+	outputPath: string,
+	outputMode: "inline" | "file-only" | undefined,
+	cwdAnchor: string,
+): Promise<void> {
+	const resolved = path.isAbsolute(outputPath) ? outputPath : path.resolve(cwdAnchor, outputPath);
+	try {
+		await fs.promises.mkdir(path.dirname(resolved), { recursive: true });
+		const body = r.finalOutput ?? "";
+		await fs.promises.writeFile(resolved, body, "utf-8");
+		r.outputPath = resolved;
+		// Default file-only when output is set; inline opts back in.
+		r.outputMode = outputMode ?? "file-only";
+		r.outputBytes = Buffer.byteLength(body, "utf-8");
+		r.outputLineCount = body === "" ? 0 : body.split("\n").length;
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		r.stderrTail = [...r.stderrTail, `failed to write output to ${resolved}: ${msg}`];
+	}
 }
 
 /**
@@ -96,6 +148,7 @@ export interface SwivalOverrides {
 	traceDir?: string;
 	verify?: string;
 	encryptSecrets?: boolean;
+	timeoutMs?: number;
 }
 
 export function buildSwivalArgs(
@@ -862,6 +915,21 @@ async function runSingleSwival(
 		});
 	};
 
+	let emitTimer: NodeJS.Timeout | undefined;
+	let emitPending = false;
+	const scheduleEmit = () => {
+		if (!onUpdate) return;
+		emitPending = true;
+		if (emitTimer) return;
+		emitTimer = setTimeout(() => {
+			emitTimer = undefined;
+			if (!emitPending) return;
+			emitPending = false;
+			emit();
+		}, 100);
+		emitTimer.unref?.();
+	};
+
 	const stopTrace = startTraceTail(traceDir, (event) => {
 		if (!current.traceEvents) current.traceEvents = [];
 		// Merge tool_result results into the matching toolCall to avoid
@@ -873,13 +941,13 @@ async function runSingleSwival(
 				const prev = current.traceEvents[i];
 				if (prev.type === "toolCall" && prev.name === event.name && prev.ok === undefined) {
 					prev.ok = event.ok;
-					emit();
+					scheduleEmit();
 					return;
 				}
 			}
 		}
 		current.traceEvents.push(event);
-		emit();
+		scheduleEmit();
 	});
 
 	const started = Date.now();
@@ -901,17 +969,35 @@ async function runSingleSwival(
 				stdio: ["ignore", "pipe", "pipe"],
 			});
 
+			const stdoutDecoder = new TextDecoder("utf-8");
+			const stderrDecoder = new TextDecoder("utf-8");
+
+			let timeoutTimer: NodeJS.Timeout | undefined;
+			let timeoutKillTimer: NodeJS.Timeout | undefined;
+			const ms = effectiveOverrides.timeoutMs;
+			if (typeof ms === "number" && Number.isFinite(ms) && ms > 0) {
+				timeoutTimer = setTimeout(() => {
+					stderrLines.push(`swival timed out after ${ms}ms`);
+					try { proc.kill("SIGTERM"); } catch { /* already dead */ }
+					timeoutKillTimer = setTimeout(() => {
+						try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+					}, 5000);
+					timeoutKillTimer.unref?.();
+				}, ms);
+				timeoutTimer.unref?.();
+			}
+
 			proc.stdout.on("data", (buf: Buffer) => {
-				stdoutBuf += buf.toString("utf-8");
-				if (stdoutBuf.length > STDOUT_TAIL_CHARS * 4) {
-					stdoutBuf = stdoutBuf.slice(-STDOUT_TAIL_CHARS * 4);
+				stdoutBuf += stdoutDecoder.decode(buf, { stream: true });
+				if (stdoutBuf.length > STDOUT_RING_BYTES) {
+					stdoutBuf = stdoutBuf.slice(-STDOUT_RING_BYTES);
 				}
 				current.finalOutput = stdoutBuf;
-				emit();
+				scheduleEmit();
 			});
 
 			proc.stderr.on("data", (buf: Buffer) => {
-				stderrBuf += stripAnsi(buf.toString("utf-8"));
+				stderrBuf += stripAnsi(stderrDecoder.decode(buf, { stream: true }));
 				const lines = stderrBuf.split("\n");
 				stderrBuf = lines.pop() ?? "";
 				for (const line of lines) {
@@ -920,10 +1006,15 @@ async function runSingleSwival(
 					stderrLines.push(trimmed);
 				}
 				current.stderrTail = tail(stderrLines, STDERR_TAIL_LINES);
-				emit();
+				scheduleEmit();
 			});
 
 			proc.on("close", (code, signal) => {
+				if (emitTimer) { clearTimeout(emitTimer); emitTimer = undefined; }
+				if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = undefined; }
+				if (timeoutKillTimer) { clearTimeout(timeoutKillTimer); timeoutKillTimer = undefined; }
+				stdoutBuf += stdoutDecoder.decode();
+				stderrBuf += stderrDecoder.decode();
 				if (stderrBuf.trim()) stderrLines.push(stderrBuf);
 				if (code === null) {
 					// The process exited because of a signal (typically our
@@ -944,6 +1035,11 @@ async function runSingleSwival(
 			});
 
 			proc.on("error", (err) => {
+				if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = undefined; }
+				if (timeoutKillTimer) { clearTimeout(timeoutKillTimer); timeoutKillTimer = undefined; }
+				if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+					current.errorMessage = "swival CLI not found on PATH. Install with: uv tool install swival";
+				}
 				stderrLines.push(`spawn error: ${err.message}`);
 				current.stderrTail = tail(stderrLines, STDERR_TAIL_LINES);
 				resolve(1);
@@ -973,14 +1069,15 @@ async function runSingleSwival(
 		current.report = await readReport(reportPath);
 
 		// Prefer result.answer from the report JSON as the authoritative final
-		// output. Swival streams the answer to stdout too, but our 16KB stdout
-		// ring-buffer (STDOUT_TAIL_CHARS*4) silently truncates long answers.
+		// output. Swival streams the answer to stdout too, but our 256 KB stdout
+		// ring-buffer (STDOUT_RING_BYTES) silently truncates long answers.
 		// The report JSON carries the complete, un-truncated answer.
 		if (current.report?.answer && current.report.answer.trim()) {
 			current.finalOutput = current.report.answer.trim();
 		} else {
 			current.finalOutput = stdoutBuf.trim();
 		}
+		emit(); // synchronous final emit: caller must see canonical end state
 
 		// Persist artifacts BEFORE the finally-block removes tmpDir. Callers
 		// expect report.json and <session>.jsonl to outlive the run so failure
@@ -1092,6 +1189,9 @@ export const ChainItem = Type.Object(
 			description: "Task with optional {previous} placeholder for prior step's output",
 		}),
 		cwd: Type.Optional(Type.String({ description: "Working directory for the swival process" })),
+		seed: Type.Optional(Type.Number({ description: "Override --seed for this chain step only." })),
+		output: Type.Optional(Type.String({ description: "Chain mode: file path to write this step's finalOutput to. Relative paths resolve against the step's cwd (or top-level cwd). Per-step output overrides top-level output. Defaults to file-only content unless outputMode=\"inline\"." })),
+		outputMode: Type.Optional(StringEnum(["inline", "file-only"] as const, { description: "Chain mode: how to surface this step's output. Default with output is file-only; inline returns the body even when also writing to a file." })),
 	},
 	{ additionalProperties: false },
 );
@@ -1186,6 +1286,9 @@ const SwivalParams = Type.Object({
 				"Parallel-mode only: cap on bytes of a single task's finalOutput inlined into the tool-response content. When a task exceeds the cap, the block shows the first maxInlineBytes followed by a loud [truncated N bytes; full output at <artifactDir>] marker. Omit (default) to inline the full output — silent truncation is never the default. To avoid token growth entirely, pass per-task `output: \"...\"` paths instead.",
 		}),
 	),
+	output: Type.Optional(Type.String({ description: "Single/chain mode: file path to write the run's finalOutput to. Relative paths resolve against cwd. When set, the tool-response content defaults to file-only metadata (path + size) instead of inlining the body — set outputMode=\"inline\" to also receive the body inline." })),
+	outputMode: Type.Optional(StringEnum(["inline", "file-only"] as const, { description: "Single/chain mode: how to surface output in the tool-response content. Default with output is file-only; inline returns the body even when also writing to a file." })),
+	timeoutMs: Type.Optional(Type.Number({ minimum: 1, description: "Wall-clock budget in milliseconds for the swival process. On expiry: SIGTERM, then SIGKILL after 5 seconds. No default; only enforced when set." })),
 });
 
 function buildOverridesFromParams(params: Record<string, unknown>): SwivalOverrides {
@@ -1209,6 +1312,7 @@ function buildOverridesFromParams(params: Record<string, unknown>): SwivalOverri
 		cacheDir: g<string>("cacheDirOverride"),
 		verify: g<string>("verifyOverride"),
 		encryptSecrets: g<boolean>("encryptSecretsOverride"),
+		timeoutMs: g<number>("timeoutMs"),
 	};
 }
 
@@ -1352,17 +1456,10 @@ export function buildParallelSummary(
 			if (hasOutputFile) {
 				lines.push(`output file: ${r.outputPath}`);
 			}
-			const body = r.finalOutput ?? "";
-			if (body.length > 0) {
+		const body = r.finalOutput ?? "";
+		if (body.length > 0) {
 				lines.push("");
-				if (typeof cap === "number" && cap > 0 && body.length > cap) {
-					const cut = body.length - cap;
-					lines.push(body.slice(0, cap));
-					const pointer = r.artifactDir ?? r.outputPath ?? "report.json";
-					lines.push(`[truncated ${cut} bytes; full output at ${pointer}]`);
-				} else {
-					lines.push(body);
-				}
+				lines.push(applyInlineCap(body, cap, r.artifactDir ?? r.outputPath ?? "report.json"));
 			}
 		}
 		// Failed tasks omit the finalOutput body: mid-run stdout for a
@@ -1442,7 +1539,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			// Project-local agent approval, mirroring pi's subagent extension.
-			if ((agentScope === "project" || agentScope === "both") && confirmProjectAgents && ctx.hasUI) {
+			if ((agentScope === "project" || agentScope === "both") && confirmProjectAgents) {
 				const requested = new Set<string>();
 				if (params.chain) for (const s of params.chain) requested.add(s.agent);
 				if (params.tasks) for (const t of params.tasks) requested.add(t.agent);
@@ -1452,6 +1549,13 @@ export default function (pi: ExtensionAPI) {
 					.filter((a): a is SwivalAgentConfig => a?.source === "project");
 				if (projectRequested.length > 0) {
 					const names = projectRequested.map((a) => a.name).join(", ");
+					if (!ctx.hasUI) {
+						return {
+							content: [{ type: "text", text: `Refusing to run project-local swival agents (${names}) without UI confirmation. Pass confirmProjectAgents: false to opt out, or invoke from an interactive session.` }],
+							details: makeDetails(hasChain ? "chain" : hasTasks ? "parallel" : "single")([]),
+							isError: true,
+						};
+					}
 					const dir = discovery.projectAgentsDir ?? "(unknown)";
 					const ok = await ctx.ui.confirm(
 						"Run project-local swival agents?",
@@ -1484,6 +1588,10 @@ export default function (pi: ExtensionAPI) {
 				for (let i = 0; i < params.chain.length; i++) {
 					const step = params.chain[i];
 					const taskWithContext = step.task.replace(/\{previous\}/g, previousOutput);
+					// Per-step seed outranks the shared override so callers can
+					// seed each step independently for reproducibility.
+					const perStepOverrides: SwivalOverrides =
+						step.seed !== undefined ? { ...overrides, seed: step.seed } : overrides;
 
 					const chainUpdate: OnUpdateCallback | undefined = onUpdate
 						? (partial) => {
@@ -1501,32 +1609,43 @@ export default function (pi: ExtensionAPI) {
 						step.agent,
 						taskWithContext,
 						step.cwd,
-						overrides,
+						perStepOverrides,
 						signal,
 						chainUpdate,
 						makeDetails("chain"),
 					);
-					results.push(r);
+				results.push(r);
 
 					if (isRunFailure(r)) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: `swival chain stopped at step ${i + 1} (${step.agent}): ${r.errorMessage ?? "(no message)"}`,
-								},
-							],
-							details: makeDetails("chain")(results),
-							isError: true,
-						};
-					}
-					previousOutput = r.finalOutput;
+					const partial = r.finalOutput?.trim();
+					const headline = `swival chain stopped at step ${i + 1} (${step.agent}): ${r.errorMessage ?? "(no message)"}`;
+					const text = partial
+						? `${headline}\n\n--- partial output ---\n${applyInlineCap(partial, params.maxInlineBytes, r.artifactDir)}`
+						: headline;
+					return {
+						content: [{ type: "text", text }],
+						details: makeDetails("chain")(results),
+						isError: true,
+					};
 				}
-				const last = results[results.length - 1];
-				return {
-					content: [{ type: "text", text: last.finalOutput || "(no output)" }],
-					details: makeDetails("chain")(results),
-				};
+				const isLastStep = i === params.chain.length - 1;
+				const stepOutput = step.output ?? (isLastStep ? params.output : undefined);
+				const stepOutputMode = step.outputMode ?? (isLastStep ? params.outputMode : undefined);
+				if (stepOutput) {
+					const resolveBase = step.cwd ?? params.cwd ?? ctx.cwd;
+					await writeRunOutput(r, stepOutput, stepOutputMode, resolveBase);
+				}
+				previousOutput = r.finalOutput;
+				}
+			const last = results[results.length - 1];
+			const fileOnly = last.outputPath && last.outputMode === "file-only";
+			const contentText = fileOnly
+				? `→ ${last.outputPath} (${last.outputLineCount ?? 0} lines, ${last.outputBytes ?? 0} bytes)`
+				: applyInlineCap(last.finalOutput || "(no output)", params.maxInlineBytes, last.artifactDir ?? last.outputPath);
+			return {
+				content: [{ type: "text", text: contentText }],
+				details: makeDetails("chain")(results),
+			};
 			}
 
 			if (params.tasks && params.tasks.length > 0) {
@@ -1591,29 +1710,13 @@ export default function (pi: ExtensionAPI) {
 						},
 						makeDetails("parallel"),
 					);
-					// Persist per-task output to a file when requested. The path
-					// resolves relative to the task's cwd (or the tool cwd) so
-					// caller-supplied relative paths behave like shell redirections.
-					if (t.output) {
-						const resolveBase = t.cwd ?? params.cwd ?? ctx.cwd;
-						const outPath = path.isAbsolute(t.output) ? t.output : path.resolve(resolveBase, t.output);
-						try {
-							await fs.promises.mkdir(path.dirname(outPath), { recursive: true });
-							const body = r.finalOutput ?? "";
-							await fs.promises.writeFile(outPath, body, "utf-8");
-							r.outputPath = outPath;
-							// Default to file-only when the caller requested output to a
-							// path. The common case for this flag is "I'll read the file
-							// next turn" — inlining a 50 KB audit report into the tool
-							// response wastes tokens. Opt back in with outputMode="inline".
-							r.outputMode = t.outputMode ?? "file-only";
-							r.outputBytes = Buffer.byteLength(body, "utf-8");
-							r.outputLineCount = body === "" ? 0 : body.split("\n").length;
-						} catch (err) {
-							const msg = err instanceof Error ? err.message : String(err);
-							r.stderrTail = [...r.stderrTail, `failed to write output to ${outPath}: ${msg}`];
-						}
-					}
+				// Persist per-task output to a file when requested. The path
+				// resolves relative to the task's cwd (or the tool cwd) so
+				// caller-supplied relative paths behave like shell redirections.
+				if (t.output) {
+					const resolveBase = t.cwd ?? params.cwd ?? ctx.cwd;
+					await writeRunOutput(r, t.output, t.outputMode, resolveBase);
+				}
 					placeholders[idx] = r;
 					emitParallel();
 					return r;
@@ -1657,8 +1760,15 @@ export default function (pi: ExtensionAPI) {
 					isError: true,
 				};
 			}
+			if (params.output) {
+				await writeRunOutput(result, params.output, params.outputMode, params.cwd ?? ctx.cwd);
+			}
+			const fileOnly = result.outputPath && result.outputMode === "file-only";
+			const contentText = fileOnly
+				? `→ ${result.outputPath} (${result.outputLineCount ?? 0} lines, ${result.outputBytes ?? 0} bytes)`
+				: applyInlineCap(result.finalOutput || "(no output)", params.maxInlineBytes, result.artifactDir ?? result.outputPath);
 			return {
-				content: [{ type: "text", text: result.finalOutput || "(no output)" }],
+				content: [{ type: "text", text: contentText }],
 				details: makeDetails("single")([result]),
 			};
 		},
