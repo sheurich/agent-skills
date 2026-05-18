@@ -16,7 +16,7 @@ if [[ ! -d node_modules/vitest ]]; then
 fi
 
 # 2. Find the Pi install so we can symlink the peer packages the extension
-#    imports from: @mariozechner/{pi-ai, pi-agent-core, pi-coding-agent,
+#    imports from: @earendil-works/{pi-ai, pi-agent-core, pi-coding-agent,
 #    pi-tui} and typebox.
 PI_PKG=""
 npm_global_root=""
@@ -39,7 +39,7 @@ if [[ -z "$PI_PKG" ]]; then
 	exit 1
 fi
 
-mkdir -p node_modules/@mariozechner
+mkdir -p node_modules/@earendil-works
 
 # Determine the scope prefix used by this install (@earendil-works or @mariozechner).
 if [[ -d "${PI_PKG}/node_modules/@earendil-works/pi-ai" ]]; then
@@ -51,9 +51,10 @@ else
 	exit 1
 fi
 
-# The extension imports from @mariozechner/* — symlink regardless of actual scope.
+# The extension imports from @earendil-works/* — symlink to whatever scope
+# the Pi install uses internally.
 for pkg in pi-ai pi-agent-core; do
-	ln -sfn "${PI_PKG}/node_modules/${PI_SCOPE}/${pkg}" "node_modules/@mariozechner/${pkg}"
+	ln -sfn "${PI_PKG}/node_modules/${PI_SCOPE}/${pkg}" "node_modules/@earendil-works/${pkg}"
 done
 
 # pi-tui may live under pi-coding-agent or as a sibling top-level package.
@@ -63,12 +64,12 @@ if [[ ! -d "$PI_TUI" ]]; then
 	PI_TUI="$(dirname "$PI_PKG")/pi-tui"
 fi
 if [[ -d "$PI_TUI" ]]; then
-	ln -sfn "$PI_TUI" "node_modules/@mariozechner/pi-tui"
+	ln -sfn "$PI_TUI" "node_modules/@earendil-works/pi-tui"
 else
 	echo "warning: could not locate pi-tui; tests importing TUI types will fail." >&2
 fi
 
-ln -sfn "$PI_PKG" node_modules/@mariozechner/pi-coding-agent
+ln -sfn "$PI_PKG" node_modules/@earendil-works/pi-coding-agent
 ln -sfn "${PI_PKG}/node_modules/typebox" node_modules/typebox
 
 echo "swival-subagent __tests__ ready. Run: npx vitest run"
