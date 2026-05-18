@@ -4,12 +4,21 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const extensionSource = resolve(testDir, "..", "extensions", "auto-summarize");
 
-test("Pi can load auto-summarize through a deployed directory symlink", async () => {
+function piAvailable() {
+  try {
+    execFileSync("pi", ["--help"], { stdio: "ignore", timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("Pi can load auto-summarize through a deployed directory symlink", { skip: !piAvailable() && "pi not found on PATH" }, async () => {
   const dir = await mkdtemp(join(tmpdir(), "auto-summarize-load-"));
   const link = join(dir, "auto-summarize");
   await symlink(extensionSource, link, "dir");
