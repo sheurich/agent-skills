@@ -81,6 +81,29 @@ swival-subagent with chain: [
 ]
 ```
 
+### Async / background execution
+
+Run a long task in the background and return immediately:
+
+```
+swival-subagent with agent: "reviewed-worker", task: "Refactor the auth module", async: true
+```
+
+The tool returns a `runId` (e.g. `swival-run-1716326580000`). `async: true` is only supported in single-agent mode, not chain/parallel.
+
+Once started, manage it using `action` and `id`:
+
+| Action      | Description |
+|-------------|-------------|
+| `status`    | Check if running, or get the final outcome if done |
+| `resume`    | Get the final answer and reviewer feedback when finished |
+| `interrupt` | Cancel a running task via SIGTERM |
+
+Example:
+```
+swival-subagent with action: "status", id: "swival-run-1716326580000"
+```
+
 ### Dispatch-time overrides
 
 Override agent frontmatter per call without editing the agent
