@@ -11,7 +11,7 @@ description: >-
 
 # Swival
 
-Tracked against Swival 1.0.14.
+Tracked against Swival 1.0.18.
 
 Swival is a coding agent with a built-in reviewer loop, layered
 sandboxing (builtin + AgentFS), format-preserving secret
@@ -194,6 +194,10 @@ reaching the LLM. The model sees plausible fakes; real values are
 restored locally. Enable with `encryptSecrets: true` in the agent
 or at dispatch time.
 
+### Agent Client Protocol (ACP)
+
+Run `swival --acp` to speak the Agent Client Protocol on stdio. This allows ACP-aware editors (like Zed or Neovim with `agent-client-protocol.nvim`) to drive Swival natively. Diagnostics are written to `--acp-log` when provided.
+
 ### Request auditing
 
 `--llm-filter COMMAND` intercepts every outbound LLM request.
@@ -247,8 +251,14 @@ swival --repl
 | Command | Effect |
 |---------|--------|
 | `/init` | Three-pass project scan, writes AGENTS.md |
-| `/audit [paths...]` | Security and quality audit |
+| `/loop <interval> <prompt>` | Run prompt on a timer (e.g. `5m`, `1h30m`) |
+| `/loops` | List active schedules |
+| `/unloop <id>` | Cancel active schedule |
+| `/audit [paths...]` | Security and quality audit (segment-aware globs) |
 | `/audit --all` | Deep-review every in-scope file |
+| `/audit --regen --finding N` | Regenerate specific findings |
+| `/audit --patch-max-turns N` | Budget for patch generation |
+| `/audit --measure-triage` | Recall calibration (triage vs deep-review all) |
 | `/goal <objective>` | Goal-driven mode — iterates until done |
 | `/learn` | Distil session into persistent memory |
 | `/compact` | Compress context |

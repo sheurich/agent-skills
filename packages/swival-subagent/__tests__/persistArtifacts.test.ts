@@ -30,7 +30,7 @@ describe("persistArtifacts", () => {
 		const destDir = await persistArtifacts(src, "my-agent", artifactRoot, new Date("2026-01-15T10:30:45.000Z"));
 		expect(destDir).toBeDefined();
 		expect(destDir!).toContain(artifactRoot);
-		expect(path.basename(destDir!)).toMatch(/^my-agent-20260115T103045000Z-[a-z0-9]+$/);
+		expect(path.basename(destDir!)).toMatch(/^my-agent-1768473045000-[a-z0-9]+$/);
 
 		expect(fs.existsSync(path.join(destDir!, "report.json"))).toBe(true);
 		expect(fs.readFileSync(path.join(destDir!, "report.json"), "utf-8")).toContain("success");

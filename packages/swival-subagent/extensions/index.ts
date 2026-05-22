@@ -22,7 +22,7 @@
  * verify, sandbox, files, commands, etc.). See agents.ts.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -51,6 +51,61 @@ const STDOUT_RING_CHARS = 256 * 1024;
 // Artifacts are copied here before the per-run temp dir is deleted. Caller
 // sees report.json + trace JSONL under a timestamped subdir keyed by agent.
 const ARTIFACT_ROOT = path.join(os.homedir(), ".pi", "agent", "swival-artifacts");
+
+// ------------------------------------------------- async run tracking --
+
+/**
+ * Metadata written to `<artifactDir>/run-meta.json` for every async run.
+ * Persisted to disk so `status` and `resume` work even after Pi restarts.
+ */
+export interface RunMeta {
+	runId: string;
+	agent: string;
+	task: string;
+	startedAt: number;
+	/** PID of the spawned swival process. Stored so we can probe it with
+	 *  `process.kill(pid, 0)` after the in-memory entry is gone. */
+	pid: number | undefined;
+	artifactDir: string;
+	stdoutFile: string;
+	stderrFile: string;
+}
+
+interface AsyncRunEntry {
+	meta: RunMeta;
+	proc: ChildProcess;
+	exited: boolean;
+	exitCode: number | null;
+}
+
+/** Written to `<artifactDir>/completed.json` when an async run exits (or fails to start). */
+interface CompletedMarker {
+	exitCode: number | null;
+	exitedAt: string; // ISO 8601
+}
+
+/** Unified view of an async run's state, for use in control actions. */
+interface RunStateInfo {
+	meta: RunMeta;
+	/** Present when the run is (or was) tracked in the in-memory asyncRuns Map. */
+	entry?: AsyncRunEntry;
+	/** True when the run has definitively exited (in-memory flag or completed.json found). */
+	exited: boolean;
+	exitCode: number | null;
+	completed?: CompletedMarker;
+	/** Contents of spawn-error.txt when swival failed to start (e.g. ENOENT). */
+	spawnError?: string;
+}
+
+/**
+ * Module-level registry of in-flight and recently completed async runs.
+ * Keyed by runId (`swival-run-<timestamp>`). Entries are added when a
+ * background spawn succeeds and updated (exited=true, exitCode set) when the
+ * process closes. Entries survive only for the lifetime of the Pi process;
+ * cross-session recovery falls back to scanning `run-meta.json` files in the
+ * artifact root.
+ */
+const asyncRuns = new Map<string, AsyncRunEntry>();
 
 // -------------------------------------------------------------- helpers --
 
@@ -274,7 +329,7 @@ export function buildSwivalArgs(
  * Subset of the swival `--report` JSON schema (version 1) that we surface.
  * Unknown / missing fields are tolerated; consumers must null-check.
  *
- * Tracked against swival 1.0.14. Known `outcome` values are "success",
+ * Tracked against swival 1.0.18. Known `outcome` values are "success",
  * "failed" (reviewer rejected), and "error" (an AgentError was raised:
  * ConfigError, ContextOverflowError, ToolsNotSupportedError, or
  * LifecycleError). For error outcomes, `result.error_message` carries
@@ -499,13 +554,22 @@ function validateToolCallsByName(
 }
 
 async function readReport(reportPath: string): Promise<ReportSummary | undefined> {
-	try {
-		const txt = await fs.promises.readFile(reportPath, "utf-8");
-		const parsed = JSON.parse(txt) as Record<string, unknown>;
-		return summarizeReport(parsed);
-	} catch {
-		return undefined;
+	// Fix 11: retry once on JSON parse error to handle non-atomic writes where
+	// the file exists but hasn't been fully flushed yet.
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			const txt = await fs.promises.readFile(reportPath, "utf-8");
+			const parsed = JSON.parse(txt) as Record<string, unknown>;
+			return summarizeReport(parsed);
+		} catch (err) {
+			if (attempt === 0 && err instanceof SyntaxError) {
+				await new Promise<void>((res) => setTimeout(res, 100));
+				continue;
+			}
+			return undefined;
+		}
 	}
+	return undefined;
 }
 
 // ---------------------------------------------------- error classify --
@@ -780,6 +844,38 @@ export function startTraceTail(
 
 // ---------------------------------------------------- artifact persist --
 
+// -------------------------------------------------- artifact dir minting --
+
+interface ArtifactDirMint {
+	artifactDir: string;
+	ts: number; // epoch ms
+	/** Includes the random suffix to prevent millisecond-level runId collisions. */
+	runId: string;
+}
+
+/**
+ * Compute a unique artifact directory path and corresponding runId for a run.
+ * Shared by both the sync path (persistArtifacts) and the async path
+ * (runSingleSwivalAsync) so they use identical timestamp format and suffix logic.
+ * The runId includes the suffix so two runs starting within the same millisecond
+ * produce distinct IDs.
+ */
+function mintArtifactDir(
+	agentName: string,
+	artifactRoot: string = ARTIFACT_ROOT,
+	ts: number = Date.now(),
+): ArtifactDirMint {
+	const safeAgent =
+		agentName
+			.replace(/[^a-zA-Z0-9._-]/g, "_")
+			.replace(/\.+/g, ".")
+			.replace(/^[._-]+/, "") || "swival";
+	const suffix = Math.random().toString(36).slice(2, 8);
+	const runId = `swival-run-${ts}-${suffix}`;
+	const artifactDir = path.join(artifactRoot, `${safeAgent}-${ts}-${suffix}`);
+	return { artifactDir, ts, runId };
+}
+
 /**
  * Copy swival's `report.json` and any `<sessionId>.jsonl` trace files from
  * the per-run tmp dir into `~/.pi/agent/swival-artifacts/<agent>-<ts>/`
@@ -796,19 +892,9 @@ export async function persistArtifacts(
 	artifactRoot: string = ARTIFACT_ROOT,
 	now: Date = new Date(),
 ): Promise<string | undefined> {
-	const ts = now
-		.toISOString()
-		.replace(/[:.\-]/g, "")
-		.replace(/Z$/, "Z");
-	// Allow only filename-safe characters and collapse leading/inner ".." so
-	// a hostile agent name can't escape artifactRoot via path traversal.
-	const safeAgent =
-		agentName
-			.replace(/[^a-zA-Z0-9._-]/g, "_")
-			.replace(/\.+/g, ".")
-			.replace(/^[._-]+/, "") || "swival";
-	const suffix = Math.random().toString(36).slice(2, 8);
-	const destDir = path.join(artifactRoot, `${safeAgent}-${ts}-${suffix}`);
+	// Fix 2: use shared mintArtifactDir so the directory naming matches the
+	// async path (epoch-ms timestamp, same suffix logic).
+	const { artifactDir: destDir } = mintArtifactDir(agentName, artifactRoot, now.getTime());
 
 	let captured = false;
 	try {
@@ -858,7 +944,268 @@ export async function persistArtifacts(
 	return destDir;
 }
 
-// ---------------------------------------------------------- run single --
+// ------------------------------------------------- artifact lifecycle --
+
+/**
+ * Remove artifact directories in `artifactRoot` that are older than 7 days
+ * (based on directory mtime). Best-effort: individual removal failures are
+ * swallowed. Called fire-and-forget at the start of every tool invocation so
+ * old artifacts from heavy audit sessions don't accumulate indefinitely.
+ */
+export async function pruneOldArtifacts(
+	artifactRoot: string = ARTIFACT_ROOT,
+	maxAgeMs: number = 7 * 24 * 60 * 60 * 1000,
+): Promise<void> {
+	const cutoff = Date.now() - maxAgeMs;
+	let entries: string[];
+	try {
+		entries = await fs.promises.readdir(artifactRoot);
+	} catch {
+		return; // root doesn't exist yet — nothing to prune
+	}
+	// Fix 4: build a set of artifactDir paths for runs that are still active
+	// (not yet exited) so we never prune a live run's directory.
+	const activeArtifactDirs = new Set<string>();
+	for (const e of asyncRuns.values()) {
+		if (!e.exited) activeArtifactDirs.add(e.meta.artifactDir);
+	}
+	for (const name of entries) {
+		const fullPath = path.join(artifactRoot, name);
+		try {
+			const stat = await fs.promises.stat(fullPath);
+			if (!stat.isDirectory() || stat.mtimeMs >= cutoff) continue;
+			// Fix 4: never prune a directory belonging to an in-flight run.
+			if (activeArtifactDirs.has(fullPath)) continue;
+			// Fix 4: require completed.json — a missing marker means the run is
+			// still active or was interrupted before it could write its marker;
+			// do not prune based on mtime alone.
+			try {
+				await fs.promises.access(path.join(fullPath, "completed.json"));
+			} catch {
+				continue;
+			}
+			await fs.promises.rm(fullPath, { recursive: true, force: true });
+		} catch {
+			/* skip unreadable or already-gone entries */
+		}
+	}
+}
+
+/**
+ * Scan every subdirectory of `artifactRoot` for a `run-meta.json` whose
+ * `runId` matches the supplied id. Used as a cross-session fallback when the
+ * in-memory `asyncRuns` Map has been cleared (e.g. Pi restarted).
+ *
+ * O(n) over artifact dirs but acceptable: the prune pass above caps n, and
+ * this is only called for control actions (status / interrupt / resume).
+ */
+export async function findRunMeta(runId: string, artifactRoot: string = ARTIFACT_ROOT): Promise<RunMeta | undefined> {
+	let entries: string[];
+	try {
+		entries = await fs.promises.readdir(artifactRoot);
+	} catch {
+		return undefined;
+	}
+	for (const name of entries) {
+		const metaPath = path.join(artifactRoot, name, "run-meta.json");
+		try {
+			const text = await fs.promises.readFile(metaPath, "utf-8");
+			const parsed = JSON.parse(text) as Record<string, unknown>;
+			// Fix 10: validate expected fields before trusting the object.
+			if (
+				typeof parsed.runId !== "string" ||
+				typeof parsed.artifactDir !== "string" ||
+				!(parsed.pid == null || typeof parsed.pid === "number")
+			) continue;
+			const meta = parsed as unknown as RunMeta;
+			if (meta.runId === runId) return meta;
+		} catch {
+			/* not a valid run-meta.json — skip */
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Fix 8: Unified run-state loader used by all three control actions.
+ *
+ * Checks the in-memory `asyncRuns` Map first (fast path for same-session
+ * queries). If the run is not there — or Pi was restarted — falls back to
+ * scanning `run-meta.json` files on disk, then reads `completed.json` (fix 6)
+ * and `spawn-error.txt` (fix 5) from the artifact dir.
+ *
+ * Returns `undefined` when the run cannot be found at all.
+ */
+async function loadRunState(runId: string): Promise<RunStateInfo | undefined> {
+	// In-memory fast path.
+	const entry = asyncRuns.get(runId);
+	if (entry) {
+		const info: RunStateInfo = {
+			meta: entry.meta,
+			entry,
+			exited: entry.exited,
+			exitCode: entry.exitCode,
+		};
+		// Also read completed.json when the entry says exited, so callers
+		// that need the marker (e.g. resume) get it without a separate read.
+		if (entry.exited) {
+			try {
+				const txt = await fs.promises.readFile(
+					path.join(entry.meta.artifactDir, "completed.json"),
+					"utf-8",
+				);
+				info.completed = JSON.parse(txt) as CompletedMarker;
+			} catch { /* best-effort */ }
+		}
+		return info;
+	}
+
+	// Disk fallback: find run-meta.json, then read completed.json + spawn-error.txt.
+	const meta = await findRunMeta(runId, ARTIFACT_ROOT);
+	if (!meta) return undefined;
+
+	let completed: CompletedMarker | undefined;
+	try {
+		const txt = await fs.promises.readFile(path.join(meta.artifactDir, "completed.json"), "utf-8");
+		completed = JSON.parse(txt) as CompletedMarker;
+	} catch { /* not yet written or missing */ }
+
+	let spawnError: string | undefined;
+	try {
+		spawnError = await fs.promises.readFile(path.join(meta.artifactDir, "spawn-error.txt"), "utf-8");
+	} catch { /* no spawn error */ }
+
+	const exited = completed !== undefined;
+	const exitCode = completed?.exitCode ?? null;
+	return { meta, exited, exitCode, completed, spawnError };
+}
+
+// ------------------------------------------------ async (background) --
+
+/**
+ * Spawn a swival run in the background (detached process). Returns immediately
+ * with a `runId` and the pre-created `artifactDir`. Stdout and stderr are
+ * redirected to files in the artifact dir via inherited file descriptors so
+ * output is preserved without holding a pipe reference.
+ *
+ * Only supported in single-agent mode. chain and parallel always run
+ * synchronously.
+ *
+ * NOTE: `--goal` (swival REPL goal mode) is an interactive/REPL-only feature
+ * and is NOT available via the CLI invocation used here. See README.
+ */
+async function runSingleSwivalAsync(
+	defaultCwd: string,
+	agents: SwivalAgentConfig[],
+	agentName: string,
+	task: string,
+	cwd: string | undefined,
+	overrides: SwivalOverrides,
+): Promise<{ runId: string; artifactDir: string }> {
+	const agent = agents.find((a) => a.name === agentName);
+	if (!agent) {
+		const available = agents.map((a) => `"${a.name}"`).join(", ") || "none";
+		throw new Error(`Unknown swival agent: "${agentName}". Available: ${available}`);
+	}
+
+	// Fix 2: use mintArtifactDir so runId includes the suffix (preventing
+	// millisecond collisions) and the directory format matches persistArtifacts.
+	const { artifactDir, ts, runId } = mintArtifactDir(agentName, ARTIFACT_ROOT);
+	const traceDir = path.join(artifactDir, "trace");
+	await fs.promises.mkdir(traceDir, { recursive: true });
+
+	const reportPath = path.join(artifactDir, "report.json");
+	const stdoutFile = path.join(artifactDir, "stdout.txt");
+	const stderrFile = path.join(artifactDir, "stderr.txt");
+	const runCwd = cwd ?? defaultCwd;
+
+	const effectiveOverrides: SwivalOverrides = { ...overrides, traceDir };
+	const args = buildSwivalArgs(agent, reportPath, runCwd, effectiveOverrides);
+	args.push("--", task);
+
+	// Fix 1: open fds for redirection safely. Open stdoutFd first; if
+	// opening stderrFd throws, close stdoutFd before propagating. Both are
+	// closed in the spawn try/finally so we never hold references that keep
+	// the event loop alive.
+	const stdoutFd = fs.openSync(stdoutFile, "w");
+	let stderrFd: number;
+	try {
+		stderrFd = fs.openSync(stderrFile, "w");
+	} catch (err) {
+		try { fs.closeSync(stdoutFd); } catch { /* ignore */ }
+		throw err;
+	}
+	let proc: ChildProcess;
+	try {
+		proc = spawn("swival", args, {
+			cwd: runCwd,
+			shell: false,
+			stdio: ["ignore", stdoutFd, stderrFd],
+			detached: true,
+		});
+	} finally {
+		try { fs.closeSync(stdoutFd); } catch { /* ignore */ }
+		try { fs.closeSync(stderrFd!); } catch { /* ignore */ }
+	}
+	proc.unref();
+
+	const meta: RunMeta = {
+		runId,
+		agent: agentName,
+		task,
+		startedAt: ts,
+		pid: proc.pid,
+		artifactDir,
+		stdoutFile,
+		stderrFile,
+	};
+	await fs.promises.writeFile(
+		path.join(artifactDir, "run-meta.json"),
+		JSON.stringify(meta, null, 2),
+		"utf-8",
+	);
+
+	const entry: AsyncRunEntry = { meta, proc, exited: false, exitCode: null };
+	asyncRuns.set(runId, entry);
+
+	// TTL after which we remove a completed run from the in-memory map;
+	// long enough that same-session status/resume queries still work.
+	const ASYNC_RUN_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+	// Fix 6: write completed.json on close so cross-session fallback can
+	// determine whether the run finished without relying on process.kill probes.
+	// Fix 3: schedule asyncRuns.delete after 1 h (TTL).
+	proc.on("close", (code) => {
+		const e = asyncRuns.get(runId);
+		if (e) { e.exited = true; e.exitCode = code; }
+		const marker: CompletedMarker = { exitCode: code, exitedAt: new Date().toISOString() };
+		fs.promises
+			.writeFile(path.join(artifactDir, "completed.json"), JSON.stringify(marker, null, 2), "utf-8")
+			.catch(() => { /* best-effort */ });
+		setTimeout(() => { asyncRuns.delete(runId); }, ASYNC_RUN_TTL_MS).unref?.();
+	});
+
+	// Fix 5: capture spawn errors (e.g. ENOENT when swival is not on PATH)
+	// and persist them so status/resume can report the failure clearly.
+	// Fix 6: also write completed.json so cross-session tools see it as done.
+	// Fix 3: schedule asyncRuns.delete after TTL.
+	proc.on("error", (err) => {
+		const e = asyncRuns.get(runId);
+		if (e) { e.exited = true; }
+		fs.promises
+			.writeFile(path.join(artifactDir, "spawn-error.txt"), `swival failed to start: ${err.message}`, "utf-8")
+			.catch(() => { /* best-effort */ });
+		const marker: CompletedMarker = { exitCode: null, exitedAt: new Date().toISOString() };
+		fs.promises
+			.writeFile(path.join(artifactDir, "completed.json"), JSON.stringify(marker, null, 2), "utf-8")
+			.catch(() => { /* best-effort */ });
+		setTimeout(() => { asyncRuns.delete(runId); }, ASYNC_RUN_TTL_MS).unref?.();
+	});
+
+	return { runId, artifactDir };
+}
+
+// ---------------------------------------------------------- run single (sync) --
 
 async function runSingleSwival(
 	defaultCwd: string,
@@ -1290,6 +1637,33 @@ const SwivalParams = Type.Object({
 	output: Type.Optional(Type.String({ description: "Single/chain mode: file path to write the run's finalOutput to. Relative paths resolve against cwd. When set, the tool-response content defaults to file-only metadata (path + size) instead of inlining the body — set outputMode=\"inline\" to also receive the body inline." })),
 	outputMode: Type.Optional(StringEnum(["inline", "file-only"] as const, { description: "Single/chain mode: how to surface output in the tool-response content. Default with output is file-only; inline returns the body even when also writing to a file." })),
 	timeoutMs: Type.Optional(Type.Number({ minimum: 1, description: "Wall-clock budget in milliseconds for the swival process. On expiry: SIGTERM, then SIGKILL after 5 seconds. No default; only enforced when set." })),
+
+	// ---- async / background execution ----
+
+	/** When true, spawn the swival process detached and return immediately with
+	 *  a `runId`. Only applies to single-agent mode (agent+task). Parallel and
+	 *  chain modes ignore this flag and always run synchronously. */
+	async: Type.Optional(
+		Type.Boolean({
+			description:
+				"Single mode only: spawn swival in the background and return immediately with a runId (e.g. swival-run-<timestamp>). Stdout/stderr are piped to files in the artifact dir so output is preserved. Use action:status/resume/interrupt with the returned runId to manage the run.",
+		}),
+	),
+
+	/** Control action for a previously started async run. Must be paired with `id`. */
+	action: Type.Optional(
+		StringEnum(["status", "interrupt", "resume"] as const, {
+			description:
+				"Control action for an async run identified by `id`. status: check whether the run is alive or read its final report.json. interrupt: send SIGTERM to the process. resume: return the final output and reviewer feedback from a completed run.",
+		}),
+	),
+
+	/** runId of the async run to query (returned by a prior async invocation). */
+	id: Type.Optional(
+		Type.String({
+			description: "runId returned by a previous async invocation (e.g. swival-run-1716326580000). Required when action is set.",
+		}),
+	),
 });
 
 function buildOverridesFromParams(params: Record<string, unknown>): SwivalOverrides {
@@ -1495,6 +1869,9 @@ export default function (pi: ExtensionAPI) {
 		parameters: SwivalParams,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+			// Prune artifact dirs older than 7 days — fire-and-forget, never blocks.
+			void pruneOldArtifacts(ARTIFACT_ROOT);
+
 			const agentScope: AgentScope = params.agentScope ?? "user";
 			// Project-agent discovery must walk up from the effective working
 			// directory the swival process will run in, not Pi's own cwd. In
@@ -1508,15 +1885,6 @@ export default function (pi: ExtensionAPI) {
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
 			const overrides = buildOverridesFromParams(params as unknown as Record<string, unknown>);
 
-			const hasChain = (params.chain?.length ?? 0) > 0;
-			const hasTasks = (params.tasks?.length ?? 0) > 0;
-			// Default to the generic "swival" agent when task is provided without an explicit agent.
-			if (!params.agent && params.task && !hasChain && !hasTasks) {
-				params.agent = "swival";
-			}
-			const hasSingle = Boolean(params.agent && params.task);
-			const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
-
 			const makeDetails =
 				(mode: "single" | "parallel" | "chain") =>
 				(results: SwivalResult[]): SwivalDetails => ({
@@ -1525,6 +1893,159 @@ export default function (pi: ExtensionAPI) {
 					projectAgentsDir: discovery.projectAgentsDir,
 					results,
 				});
+
+			// Fix 7a: async is only supported in single mode.
+			if (params.async && ((params.chain?.length ?? 0) > 0 || (params.tasks?.length ?? 0) > 0)) {
+				return {
+					content: [{ type: "text", text: "`async: true` is only supported in single mode (agent + task). Remove `chain` or `tasks`, or omit `async`." }],
+					details: makeDetails("single")([]),
+					isError: true,
+				};
+			}
+
+			// Fix 7b: action is mutually exclusive with run-dispatch fields.
+			if (params.action) {
+				const conflicting = (["agent", "task", "tasks", "chain", "async"] as const)
+					.filter((k) => params[k] != null && params[k] !== false);
+				if (conflicting.length > 0) {
+					return {
+						content: [{ type: "text", text: `\`action\` cannot be combined with: ${conflicting.join(", ")}. Use \`action\` + \`id\` alone.` }],
+						details: makeDetails("single")([]),
+						isError: true,
+					};
+				}
+			}
+
+			// ---- control actions (status / interrupt / resume) ----
+			// Fix 8: all three actions use loadRunState() for a unified lookup that
+			// checks asyncRuns first, then falls back to disk (run-meta.json +
+			// completed.json + spawn-error.txt). No more process.kill(pid,0) probes.
+			if (params.action) {
+				const runId = params.id;
+				if (!runId) {
+					return {
+						content: [{ type: "text", text: `\`id\` is required when \`action\` is set (got action="${params.action}").` }],
+						details: makeDetails("single")([]),
+						isError: true,
+					};
+				}
+
+				if (params.action === "status") {
+					const state = await loadRunState(runId);
+					if (!state) {
+						return {
+							content: [{ type: "text", text: `Run ${runId} not found. It may have been pruned or was never started.` }],
+							details: makeDetails("single")([]),
+							isError: true,
+						};
+					}
+					if (!state.exited) {
+						return {
+							content: [{ type: "text", text: `Run ${runId} is still running (pid: ${state.meta.pid ?? "unknown"}).\nArtifact dir: ${state.meta.artifactDir}` }],
+							details: makeDetails("single")([]),
+						};
+					}
+					if (state.spawnError) {
+						return {
+							content: [{ type: "text", text: `Run ${runId} failed to start: ${state.spawnError}\nArtifact dir: ${state.meta.artifactDir}` }],
+							details: makeDetails("single")([]),
+							isError: true,
+						};
+					}
+					const report = await readReport(path.join(state.meta.artifactDir, "report.json"));
+					const outcome = report?.outcome ?? "unknown";
+					const exitedAt = state.completed?.exitedAt ?? "unknown";
+					return {
+						content: [{ type: "text", text: `Run ${runId} completed (exit ${state.exitCode ?? "?"}, outcome: ${outcome}, exitedAt: ${exitedAt}).\nArtifact dir: ${state.meta.artifactDir}` }],
+						details: makeDetails("single")([]),
+					};
+				}
+
+				if (params.action === "interrupt") {
+					const state = await loadRunState(runId);
+					if (!state || state.exited) {
+						return {
+							content: [{ type: "text", text: `Run ${runId} is not running (already completed or not found) — nothing to interrupt.` }],
+							details: makeDetails("single")([]),
+							isError: true,
+						};
+					}
+					const pid = state.meta.pid;
+					if (pid == null) {
+						return {
+							content: [{ type: "text", text: `Run ${runId} has no recorded PID — cannot interrupt.` }],
+							details: makeDetails("single")([]),
+							isError: true,
+						};
+					}
+					// Fix 9: signal the entire process group so child processes
+					// (sub-shells, nested tools) are also terminated.
+					// Schedule SIGKILL escalation after 5 s in case SIGTERM is ignored.
+					try {
+						process.kill(-pid, "SIGTERM");
+					} catch {
+						return {
+							content: [{ type: "text", text: `Run ${runId} is not running (pid ${pid} not found). It may have already completed.` }],
+							details: makeDetails("single")([]),
+							isError: true,
+						};
+					}
+					const killTimer = setTimeout(() => {
+						try { process.kill(-pid, "SIGKILL"); } catch { /* already gone */ }
+					}, 5000);
+					killTimer.unref?.();
+					return {
+						content: [{ type: "text", text: `Sent SIGTERM to process group of run ${runId} (pgid: ${pid}). SIGKILL escalation scheduled in 5 s.` }],
+						details: makeDetails("single")([]),
+					};
+				}
+
+				if (params.action === "resume") {
+					const state = await loadRunState(runId);
+					if (!state) {
+						return {
+							content: [{ type: "text", text: `Run ${runId} not found. It may have been pruned or was never started.` }],
+							details: makeDetails("single")([]),
+							isError: true,
+						};
+					}
+					if (!state.exited) {
+						return {
+							content: [{ type: "text", text: `Run ${runId} is still in progress (pid: ${state.meta.pid ?? "unknown"}). Wait for it to complete, or interrupt it first.` }],
+							details: makeDetails("single")([]),
+							isError: true,
+						};
+					}
+					if (state.spawnError) {
+						return {
+							content: [{ type: "text", text: `Run ${runId} failed to start: ${state.spawnError}\nArtifact dir: ${state.meta.artifactDir}` }],
+							details: makeDetails("single")([]),
+							isError: true,
+						};
+					}
+					// Read final output: prefer report.result.answer, fall back to stdout file.
+					const report = await readReport(path.join(state.meta.artifactDir, "report.json"));
+					const stdoutContent = await fs.promises.readFile(state.meta.stdoutFile, "utf-8").catch(() => "");
+					const finalOutput = (report?.answer?.trim() || stdoutContent.trim()) || "(no output)";
+					const feedback = report?.lastReviewFeedback;
+					const outcome = report?.outcome ?? "unknown";
+					let text = `Run ${runId} (${state.meta.agent}) — outcome: ${outcome}\nArtifact dir: ${state.meta.artifactDir}\n\n${finalOutput}`;
+					if (feedback) text += `\n\n─── reviewer feedback ───\n${feedback}`;
+					return {
+						content: [{ type: "text", text }],
+						details: makeDetails("single")([]),
+					};
+				}
+			}
+
+			const hasChain = (params.chain?.length ?? 0) > 0;
+			const hasTasks = (params.tasks?.length ?? 0) > 0;
+			// Default to the generic "swival" agent when task is provided without an explicit agent.
+			if (!params.agent && params.task && !hasChain && !hasTasks) {
+				params.agent = "swival";
+			}
+			const hasSingle = Boolean(params.agent && params.task);
+			const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
 
 			if (modeCount !== 1) {
 				const available = agents.map((a) => `${a.name} (${a.source})`).join(", ") || "none";
@@ -1742,6 +2263,48 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			// Single mode
+			// ---- async (background) path ----
+			if (params.async) {
+				const agentName = params.agent as string;
+				const task = params.task as string;
+				let runId: string;
+				let artifactDir: string;
+				try {
+					({ runId, artifactDir } = await runSingleSwivalAsync(
+						ctx.cwd,
+						agents,
+						agentName,
+						task,
+						params.cwd,
+						overrides,
+					));
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					return {
+						content: [{ type: "text", text: `Failed to start async run: ${msg}` }],
+						details: makeDetails("single")([]),
+						isError: true,
+					};
+				}
+				return {
+					content: [{
+						type: "text",
+						text: [
+							`Async swival run started.`,
+							`runId:        ${runId}`,
+							`agent:        ${agentName}`,
+							`artifactDir:  ${artifactDir}`,
+							``,
+							`Use action:"status" id:"${runId}" to check progress.`,
+							`Use action:"resume" id:"${runId}" to retrieve the final output when done.`,
+							`Use action:"interrupt" id:"${runId}" to cancel.`,
+						].join("\n"),
+					}],
+					details: makeDetails("single")([]),
+				};
+			}
+
+			// ---- synchronous path ----
 			const result = await runSingleSwival(
 				ctx.cwd,
 				agents,

@@ -191,6 +191,60 @@ All chain steps share the single dispatch-time overrides object. For
 different overrides per step, call the tool multiple times in single mode
 and pass each step's output as context to the next.
 
+### Async / background execution
+
+For long-running agents you can spawn the swival process in the background and
+return immediately:
+
+```text
+Use `swival-subagent` with:
+  agent: "reviewed-worker"
+  task:  "Refactor the entire auth module"
+  async: true
+```
+
+The tool returns immediately with a `runId` (e.g. `swival-run-1716326580000`)
+and an `artifactDir` path. Stdout, stderr, `report.json`, and the trace JSONL
+are written directly to that artifact dir — no data is lost even if Pi
+restarts.
+
+`async: true` is only supported in single-agent mode (`agent` + `task`).
+Parallel (`tasks[]`) and chain modes always run synchronously.
+
+#### Managing async runs — `action` + `id`
+
+Once a run is started you control it with the `action` and `id` parameters.
+`id` must be the `runId` string returned by the async invocation.
+
+| `action`    | What it does |
+|-------------|-------------|
+| `status`    | Check whether the process is still alive. If done, reports the `report.json` outcome. Works cross-session (survives Pi restart) by scanning `run-meta.json` files on disk. |
+| `interrupt` | Send `SIGTERM` to the process. Works cross-session via the stored pid. |
+| `resume`    | Return the final output and reviewer feedback from a completed run. Reads `report.result.answer` (preferred) then falls back to `stdout.txt`. |
+
+Example — check status:
+
+```text
+Use `swival-subagent` with action: "status", id: "swival-run-1716326580000"
+```
+
+Example — retrieve result when done:
+
+```text
+Use `swival-subagent` with action: "resume", id: "swival-run-1716326580000"
+```
+
+Example — cancel a run:
+
+```text
+Use `swival-subagent` with action: "interrupt", id: "swival-run-1716326580000"
+```
+
+Active runs are tracked in a module-level `Map` keyed by `runId`. If Pi
+restarts the Map is cleared, but `status` / `interrupt` / `resume` fall back
+to scanning `~/.pi/agent/swival-artifacts/*/run-meta.json` on disk, so
+cross-session recovery works as long as the artifact dir hasn't been pruned.
+
 ### Dispatch-time overrides
 
 All agent frontmatter is canonical. Callers may override specific fields per call.
@@ -293,12 +347,9 @@ Common failure modes get a one-line headline instead of a raw stderr dump:
   `swival-subagent` does not. Parallel tasks share the host working tree,
   so they must not touch overlapping files. If isolation matters, dispatch
   serially or use per-task `cwd` pointing at pre-created worktrees.
-- No async / runId / resume. Every dispatch is synchronous for the
-  lifetime of the tool call. There is no way to background a long-running
-  agent, check its status later, or reconnect to a live process — the
-  `pi subagent` extension offers this via `action: "status"` / `"resume"`
-  but this tool does not. Long runs must finish within the tool-call
-  window or be cancelled.
+- `async: true` is single-mode only. Parallel (`tasks[]`) and chain modes
+  always run synchronously. To background multiple tasks, dispatch each
+  individually with `async: true` and collect their `runId` values.
 - No retry-failed-subset helper. When some tasks in a parallel batch
   fail, there is no built-in way to re-run just the failures. Caller must
   inspect the result blocks, build a new `tasks[]` covering the failed
@@ -312,12 +363,19 @@ Common failure modes get a one-line headline instead of a raw stderr dump:
   injection), or `count` (repeat the same task N times). Unknown
   properties are rejected at validation time rather than silently
   dropped; call these out explicitly if you need them upstream.
-- Artifact retention. Each run writes `report.json` plus any trace JSONL
-  to `~/.pi/agent/swival-artifacts/<agent>-<ms-ts>-<rand>/`. Nothing
-  cleans these up; a heavy audit session can accumulate tens to hundreds
-  of MB. Until a `--keep-artifacts=N` policy lands, prune manually with a
-  `find ~/.pi/agent/swival-artifacts -mindepth 1 -maxdepth 1 -type d
-  -mtime +14 -exec rm -rf {} +` cron pass or equivalent.
+- Artifact auto-cleanup. Each run writes `report.json` plus any trace
+  JSONL (and, for async runs, `stdout.txt`, `stderr.txt`, and
+  `run-meta.json`) to `~/.pi/agent/swival-artifacts/<agent>-<ms-ts>-<rand>/`.
+  The extension automatically prunes directories older than **7 days** at
+  the start of every tool invocation (`pruneOldArtifacts`). If you need
+  to keep artifacts longer, back them up before they age out, or increase
+  the retention window by patching `pruneOldArtifacts`'s `maxAgeMs`
+  default.
+- **No `/goal` mode.** Swival's `/goal` command is an interactive
+  REPL-only feature — it is not available as a CLI flag. This extension
+  spawns swival non-interactively, so `/goal` cannot be used here.
+  Pass your goal as a normal `task` string instead; swival will execute
+  it as a standard agent task.
 
 ## Migrating from the v1 parallel format
 
