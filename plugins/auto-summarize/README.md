@@ -4,7 +4,7 @@ Rolling session summary and automatic session naming for
 [Pi](https://github.com/nicorevin/pi-coding-agent).
 
 After every agent turn, the extension sends the conversation delta to a
-configured cheap model in the background and maintains a concise
+configured budget model in the background and maintains a concise
 bullet-point summary plus a short session title. The summary survives
 session reloads and compactions.
 
@@ -32,8 +32,8 @@ pi install /path/to/plugins/auto-summarize
    prompt.
 
 3. **LLM call** — The current summary and new deltas are sent to the
-   configured cheap model. The extension checks `autoSummarize.model`
-   first, then the `scout` subagent override, then known cheap fallback
+   configured budget model. The extension checks `autoSummarize.model`
+   first, then the `scout` subagent override, then known budget fallback
    models. The prompt requests JSON output:
    `{"title": "...", "summary": "..."}` with 3–8 bullet points and a
    ≤72-character title in `topic: what happened` format.
@@ -79,7 +79,7 @@ Pi should use for background summaries, for example:
 ```
 
 If that setting is absent, the extension falls back to the `scout`
-subagent override and then to built-in cheap model candidates such as
+subagent override and then to built-in budget model candidates such as
 Claude Haiku 4.5 and GPT-5.4 mini. The selected model must be available
 with valid credentials in Pi's model registry.
 

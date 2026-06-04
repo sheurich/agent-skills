@@ -18,7 +18,7 @@ A Pi session with the `swival-subagent` extension loaded (via
 `pi install sheurich/agent-skills`). A working LLM provider — litellm
 proxy on `:4000`, local MLX server, or a native provider with API keys —
 and at least one swival agent definition in `~/.pi/agent/swival-agents/`
-(for example the `reviewed-worker` agent shipped with this plugin).
+(for example the `self-review-worker` agent shipped with this plugin).
 
 The user prompt must describe a non-trivial task that benefits from the
 reviewer loop — a small refactor where correctness can be checked, such
@@ -27,7 +27,7 @@ as adding input validation to a Go function.
 ## Task
 
 > Use the `swival-subagent` tool to delegate the following task to the
-> `reviewed-worker` agent: add input validation to `cmd/serve.go` for the
+> `self-review-worker` agent: add input validation to `cmd/serve.go` for the
 > `Serve()` function. Use swival's reviewer loop so the change is
 > double-checked.
 
@@ -37,7 +37,7 @@ as adding input validation to a Go function.
       a raw `bash` call to `swival`).
 - [ ] Tool call uses single-mode (`agent` + `task`), not parallel or
       chain — there is only one step.
-- [ ] `agent` parameter is `"reviewed-worker"`.
+- [ ] `agent` parameter is `"self-review-worker"`.
 - [ ] Agent surfaces the swival report summary — review rounds, tool
       call count, outcome — rather than dumping raw stderr.
 - [ ] If the reviewer rejects, the agent reports the last reviewer
@@ -79,15 +79,15 @@ as adding input validation to a Go function.
 Task issued: add input validation to `web/revoke.go`'s `parseRevokeRequest`
 function, gated by `go test ./web/... -run TestParseRevokeRequest -count=1`.
 Actual prompt used `test-runner` agent with `reviewerOverride`, not the
-criteria's `reviewed-worker` agent — the scenario was run against the
-test-as-contract pattern before the `reviewed-worker` criteria were written.
+criteria's `self-review-worker` agent — the scenario was run against the
+test-as-contract pattern before the `self-review-worker` criteria were written.
 Criteria adapted accordingly.
 
 | Criterion | Result | Observation |
 | --- | --- | --- |
 | Uses `swival-subagent` tool | Pass | Tool called directly, not via `bash swival` |
 | Single mode with agent+task | Pass | `agent: "test-runner"`, `reviewerOverride: "go test ./web/... -run TestParseRevokeRequest -count=1"` |
-| Uses a swival agent (reviewed-worker or test-runner) | Pass | `test-runner` with `reviewerOverride` acting as the acceptance gate |
+| Uses a swival agent (self-review-worker or test-runner) | Pass | `test-runner` with `reviewerOverride` acting as the acceptance gate |
 | Surfaces report summary | Pass | Reported: 1 review round, outcome accepted |
 | Reports reviewer feedback on reject | N/A | Reviewer accepted on round 1; no rejection to surface |
 | Does not silence reviewer | Pass | No `selfReviewOverride: false` or similar |

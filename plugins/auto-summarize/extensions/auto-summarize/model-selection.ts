@@ -6,10 +6,10 @@ export type ModelLike = {
 export type SettingsLike = Record<string, unknown>;
 
 /**
- * Cheap model candidates in preference order (substring matched against model ID).
+ * Budget model candidates in preference order (substring matched against model ID).
  * Configured model tiers are tried before these generic fallbacks.
  */
-export const CHEAP_MODEL_CANDIDATES = [
+export const BUDGET_MODEL_CANDIDATES = [
   "haiku-4-5",
   "gpt-5.4-mini",
   "gpt-5.1-codex-mini",
@@ -64,7 +64,7 @@ function preferredCandidate(matches: ModelLike[]): ModelLike | undefined {
     ?? matches[0];
 }
 
-export function selectCheapModel<T extends ModelLike>(
+export function selectBudgetModel<T extends ModelLike>(
   models: Iterable<T>,
   hasConfiguredAuth: (model: T) => boolean,
   settings: SettingsLike = {},
@@ -80,7 +80,7 @@ export function selectCheapModel<T extends ModelLike>(
     if (configured) return configured as T;
   }
 
-  for (const substr of CHEAP_MODEL_CANDIDATES) {
+  for (const substr of BUDGET_MODEL_CANDIDATES) {
     const matches = all.filter((model) => model.id.includes(substr) && hasConfiguredAuth(model));
     const selected = preferredCandidate(matches);
     if (selected) return selected as T;

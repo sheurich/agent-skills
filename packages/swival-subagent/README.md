@@ -37,7 +37,7 @@ pi install /path/to/agent-skills/packages/swival-subagent
 ```
 
 The plugin exposes one tool (`swival-subagent`) and four agent
-definitions (`swival`, `reviewed-worker`, `test-runner`,
+definitions (`swival`, `self-review-worker`, `test-runner`,
 `sandboxed-explorer`) in `agents/`. Copy or symlink them into
 `~/.pi/agent/swival-agents/` to make them discoverable.
 
@@ -46,7 +46,7 @@ definitions (`swival`, `reviewed-worker`, `test-runner`,
 | Agent | Use when |
 |-------|----------|
 | `swival` | Generic delegate — no system prompt, no review. Also the implicit default when `agent` is omitted. |
-| `reviewed-worker` | Multi-file code changes or any task where a second pass catches mistakes |
+| `self-review-worker` | Implementation, file edits, or artifacts that should pass through `--self-review`; not for review-only tasks |
 | `test-runner` | Task has a runnable test command (caller must pass `reviewerOverride`) |
 | `sandboxed-explorer` | Exploratory changes you want to inspect before applying |
 
@@ -64,7 +64,7 @@ packages/swival-subagent/
 │   └── agents.ts       # agent discovery
 ├── agents/             # swival agent definitions
 │   ├── swival.md
-│   ├── reviewed-worker.md
+│   ├── self-review-worker.md
 │   ├── test-runner.md
 │   └── sandboxed-explorer.md
 └── __tests__/          # self-contained vitest harness
@@ -152,7 +152,7 @@ Use `swival-subagent` with task: "Refactor the auth module".
 Single (self-reviewed):
 
 ```text
-Use `swival-subagent` with agent: "reviewed-worker"
+Use `swival-subagent` with agent: "self-review-worker"
 and task: "Add input validation to cmd/serve.go".
 ```
 
@@ -168,8 +168,8 @@ Parallel:
 
 ```text
 Use `swival-subagent` with tasks: [
-  { agent: "reviewed-worker", task: "Refactor auth module" },
-  { agent: "reviewed-worker", task: "Add error handling to parser" }
+  { agent: "self-review-worker", task: "Refactor auth module" },
+  { agent: "self-review-worker", task: "Add error handling to parser" }
 ]
 ```
 
@@ -178,7 +178,7 @@ Chain:
 ```text
 Use `swival-subagent` with chain: [
   { agent: "sandboxed-explorer", task: "Summarize the auth module" },
-  { agent: "reviewed-worker",    task: "Given this summary: {previous}\nAdd input validation." }
+  { agent: "self-review-worker",    task: "Given this summary: {previous}\nAdd input validation." }
 ]
 ```
 
@@ -198,7 +198,7 @@ return immediately:
 
 ```text
 Use `swival-subagent` with:
-  agent: "reviewed-worker"
+  agent: "self-review-worker"
   task:  "Refactor the entire auth module"
   async: true
 ```
@@ -313,7 +313,7 @@ is missing. Fields consumed:
 Header format example:
 
 ```text
-✓ reviewed-worker  claude-opus-4-6 · 3 rounds · 8 tool calls · 12.4s · accepted
+✓ self-review-worker  claude-opus-4-6 · 3 rounds · 8 tool calls · 12.4s · accepted
 ```
 
 The swival report does **not** include token or cost totals. If you need

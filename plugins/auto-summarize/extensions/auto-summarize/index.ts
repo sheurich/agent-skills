@@ -2,7 +2,7 @@
  * Auto-Summarize Extension
  *
  * Maintains a rolling session summary and title in the background.
- * After each agent turn, sends the conversation delta to a cheap model
+ * After each agent turn, sends the conversation delta to a budget model
  * and persists the result as a custom session entry.
  *
  * Commands:
@@ -15,7 +15,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { complete, type Api, type Model } from "@mariozechner/pi-ai";
 import type { CustomEntry, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { selectCheapModel } from "./model-selection.ts";
+import { selectBudgetModel } from "./model-selection.ts";
 import { createSummaryContext } from "./summary-request.ts";
 
 type ContentBlock = {
@@ -160,9 +160,9 @@ function loadPiSettings(): Record<string, unknown> {
   }
 }
 
-/** Try the configured cheap model first, then known cheap fallbacks. */
+/** Try the configured budget model first, then known budget fallbacks. */
 function findModel(ctx: ExtensionContext): Model<Api> | undefined {
-  return selectCheapModel(
+  return selectBudgetModel(
     ctx.modelRegistry.getAll(),
     (m) => ctx.modelRegistry.hasConfiguredAuth(m),
     loadPiSettings(),
@@ -266,7 +266,7 @@ export default function (pi: ExtensionAPI) {
 
     const m = model ?? (model = findModel(ctx));
     if (!m) {
-      return "no cheap model found in registry";
+      return "no budget model found in registry";
     }
 
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
