@@ -274,10 +274,9 @@ export default function (pi: ExtensionAPI) {
       model = undefined;
       return `auth failed for ${m.provider}/${m.id}: ${(auth as { error?: string }).error ?? "unknown"}`;
     }
-    if (!auth.apiKey) {
-      model = undefined;
-      return `no API key for ${m.provider}/${m.id}`;
-    }
+    // Do not require auth.apiKey: SigV4 providers (e.g. amazon-bedrock)
+    // authenticate via the credential chain / env, not a bearer key, so
+    // apiKey is legitimately undefined there. auth.ok is the real signal.
 
     // Consume queue only after confirming model + auth are available.
     const deltas = queue.splice(0);
@@ -320,7 +319,7 @@ export default function (pi: ExtensionAPI) {
       const response = await complete(
         m,
         createSummaryContext(prompt),
-        { apiKey: auth.apiKey, headers: auth.headers, maxTokens: 1024 },
+        { apiKey: auth.apiKey, headers: auth.headers, env: auth.env, maxTokens: 1024 },
       );
 
       const text = response.content
