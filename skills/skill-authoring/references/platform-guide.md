@@ -115,6 +115,10 @@ Claude Code gets full tool access in Gemini and Pi.
 - For multi-plugin repos, Gemini CLI users install individual plugins
   as separate extensions; Claude Code users install from the
   marketplace.
+- An agent loads a skill by the path the harness injects (or `/skill:name`),
+  not a `skill://` URI. The `read` tool does not resolve `skill://`. To give a
+  Pi subagent a skill, add the skill name to the agent's `skills:` frontmatter
+  rather than hardcoding a deployed path like `~/.agents/skills/...`.
 
 ## Writing for Multiple Harnesses
 
