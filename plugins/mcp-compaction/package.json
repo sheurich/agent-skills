@@ -1,0 +1,8 @@
+{
+  "name": "mcp-compaction",
+  "version": "0.1.0",
+  "description": "MCP-aware context compression for Pi coding agent",
+  "pi": {
+    "extensions": ["./extensions/mcp-compaction/index.ts"]
+  }
+}
