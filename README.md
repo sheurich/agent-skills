@@ -21,6 +21,7 @@ npx skills add sheurich/agent-skills -s <skill-name> -g
 
 | Skill | Description |
 | --- | --- |
+| [art-direction](skills/art-direction/SKILL.md) | Develops and adapts visual direction across media before production. |
 | [readiness-review](skills/readiness-review/SKILL.md) | Structured readiness assessment before proceeding to the next environment or phase. |
 | [semgrep-scan](skills/semgrep-scan/SKILL.md) | Scan changed files with Semgrep for security and correctness issues before committing. |
 | [skill-authoring](skills/skill-authoring/SKILL.md) | Write and refine agent skills. Use when generating skills from docs, extracting from sessions, designing tool interfaces, managing lifecycle, or writing for dual-harness patterns. |
