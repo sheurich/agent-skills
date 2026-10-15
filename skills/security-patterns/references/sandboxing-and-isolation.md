@@ -31,9 +31,9 @@
 - Sources: `codex-config/main/config.toml`, `codex-config/main/README.md`
 
 ## Test a permission profile against a command that must be denied
-- Rule: After installing or changing any sandbox profile, run it against one command that should fail and one that should pass, instead of trusting the profile's declared intent.
+- Rule: After installing or changing any sandbox profile, test it with one command that should fail and one that should pass. Do not trust the profile's declared intent. Probe the denied path with a non-secret canary file, never a real key. Confirm the canary is readable outside the sandbox and denied inside it.
 - Threat: Declared rules and actual enforcement diverge, and the gap surfaces only after a real leak.
-- Mechanism: `codex sandbox macos --permissions-profile tob-workspace -C . -- cat ~/.ssh/id_rsa` alongside `... -- git status`.
+- Mechanism: The README probes with `codex sandbox macos --permissions-profile tob-workspace -C . -- cat ~/.ssh/id_rsa` alongside `... -- git status`. A misconfigured profile would print that real key, so substitute a canary.
 - Sources: `codex-config/main/README.md`
 
 ## Mount narrowly, mount read-only, never mount the Docker socket
