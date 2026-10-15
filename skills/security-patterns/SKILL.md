@@ -1,15 +1,14 @@
 ---
 name: security-patterns
 description: >-
-  Compendium of security patterns for operating and building LLM coding agents
-  (sandboxing, permission gates, prompt injection, secrets, skill and MCP supply
-  chain, multi-agent controls, model-file trust, review methodology). Use when
-  configuring an agent harness, writing or reviewing a skill, hook, or MCP
-  server, designing subagent dispatch, handling untrusted repo or ticket content,
-  choosing a deny-list or allow-list, or reviewing an agent-related PR for
-  security. Triggers on agent security, harness hardening, sandbox, bypass
-  permissions, permission deny list, prompt injection, MCP trust, skill vetting,
-  pickle safety, agent supply chain.
+  Security rules for code that LLM agents call or run, plus cited patterns for
+  operating agents safely. Use before writing any tool, MCP server, hook, or
+  script that executes commands, takes a path, or acts on model-supplied or
+  untrusted input, even when the request says it is internal or urgent. Also
+  use when configuring an agent harness, sandbox, or permission allow/deny
+  lists; vetting a skill, plugin, or MCP server; designing subagent dispatch;
+  handling untrusted repo, ticket, or web content; loading pickles or model
+  files; or reviewing an agent-related PR for security.
 ---
 
 # Security Patterns

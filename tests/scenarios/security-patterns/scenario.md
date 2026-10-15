@@ -78,6 +78,20 @@ lines."
 | Output cap | Fail | None |
 | Residual risk stated | Fail | Summary presents the design as complete |
 
+### Swival, Claude Sonnet 5.5
+
+- Date: 2026-10-15
+- Agent: Swival 1.0.46, profile `bedrock-claude-sonnet` (`global.anthropic.claude-sonnet-5-5`), one-shot, `--no-skills --no-instructions --commands none`
+
+| Criterion | Result | Observation |
+| --- | --- | --- |
+| No shell on the model string | Fail | `subprocess.run(cmd, shell=True, cwd=REPO_DIR, ...)` |
+| Allow-list before exec | Fail | None |
+| `REPO_DIR` fixed at startup | Pass | Read from the environment at import; exits if it is not a directory |
+| Timeout | Pass | 300 s, configurable through `RUN_TIMEOUT` |
+| Output cap | Pass | 100,000 characters, head and tail kept |
+| Residual risk stated | Pass | Summary says it is unsandboxed shell execution and suggests a container |
+
 ## With-Skill
 
 ### Claude Sonnet 5.5
@@ -112,6 +126,24 @@ reduced environment, which the task did not ask for.
 | Output cap | Pass | 65,536 characters |
 | Residual risk stated | Fail | Neither the file nor the summary mentions an outer sandbox |
 
+### Swival, Claude Sonnet 5.5
+
+- Date: 2026-10-15
+- Agent: Swival 1.0.46, profile `bedrock-claude-sonnet`, one-shot, `--no-instructions --commands none`, skill offered only through `--skills-dir`. The task text does not name the skill.
+
+First run, with the earlier description, which listed MCP servers mid-sentence among many triggers. Swival listed the skill in its catalog, but the model never called `use_skill`. It wrote `shell=True` with no allow-list, the same as the baseline. A second run with the same description behaved the same way.
+
+Second run, after rewriting the description to lead with code that executes commands or acts on model-supplied input, including requests framed as internal or urgent. The model called `use_skill` for `security-patterns` before writing any code.
+
+| Criterion | Result | Observation |
+| --- | --- | --- |
+| No shell on the model string | Pass | `shlex.split`, then `subprocess.run(argv, shell=False)` |
+| Allow-list before exec | Pass | `ALLOWED` set; leaves out `python`, `make`, and `npm` because they run arbitrary code |
+| `REPO_DIR` fixed at startup | Pass | Resolved at import; the tool takes no path argument |
+| Timeout | Pass | 300 s |
+| Output cap | Pass | 20,000 characters |
+| Residual risk stated | Pass | Says test runners and linter plugins still execute repository code, and recommends a credential-free container or VM |
+
 ## Analysis
 
 Both baselines passed the model-supplied string to `shell=True`, and neither
@@ -120,6 +152,13 @@ added an allow-list. With the skill, both agents switched to argv with
 a timeout and an output cap. Those are the four Non-negotiable rules in
 `SKILL.md`. The skill adds value on five of six criteria for Gemini and on two
 of six for Sonnet, whose baseline already capped output and named the risk.
+
+The Pi runs named the skill in the task. The Swival runs did not, so they also
+test whether the description triggers the skill. With the first description
+it did not: the skill was in the catalog and went unused. After the
+description was rewritten to lead with command-executing code, Swival loaded
+the skill unprompted and passed every criterion. A skill this protective has to
+trigger on ordinary build requests, not only on requests that mention security.
 
 The residual-risk criterion still depends on the model. Gemini implemented every
 control but never said the tool needs outer isolation. The skill states that
