@@ -56,19 +56,29 @@ if [[ -d skills/security-patterns ]]; then
   if ! command -v perl >/dev/null 2>&1; then
     echo "Warning: perl not found, skipping security-patterns quote check" >&2
   else
-    # The Perl program is single-quoted on purpose: $line, $1 and $ARGV are
+    # The Perl program is single-quoted on purpose: $text, $1 and $ARGV are
     # Perl variables, not shell expansions.
     # shellcheck disable=SC2016
     quote_hits=$(find skills/security-patterns -type f -name '*.md' -print0 \
-      | xargs -0 perl -CSD -ne '
-          my $line = $_; chomp $line;
-          print "$ARGV:$.: block quote\n" if $line =~ /^\s*(?:(?:[-*+]|\d+[.)])\s+)*>/;
-          (my $s = $line) =~ s/`[^`]*`/ /g;
-          while ($s =~ /["\x{201C}]([^"\x{201C}\x{201D}]*)["\x{201D}]/g) {
-            my @w = split " ", $1;
-            print "$ARGV:$.: quoted run: $1\n" if @w >= 5;
+      | xargs -0 perl -CSD -0777 -ne '
+          my $text = $_;
+          my $ln = 0;
+          for my $line (split /\n/, $text, -1) {
+            $ln++;
+            print "$ARGV:$ln: block quote\n"
+              if $line =~ /^\s*(?:(?:[-*+]|\d+[.)])\s+)*>/;
           }
-          close ARGV if eof;')
+          # Blank out code spans, keeping newlines so line numbers hold.
+          $text =~ s{`[^`]*`}{ (my $c = $&) =~ s/[^\n]/ /g; $c }ge;
+          # A quoted run may wrap across lines but not across a blank line.
+          while ($text =~ /["\x{201C}]((?:[^"\x{201C}\x{201D}\n]|\n(?![ \t]*\n))*)["\x{201D}]/g) {
+            my ($q, $at) = ($1, $-[0]);
+            my @w = split " ", $q;
+            next if @w < 5;
+            my $qln = 1 + (substr($text, 0, $at) =~ tr/\n//);
+            (my $one = $q) =~ s/\s+/ /g;
+            print "$ARGV:$qln: quoted run: $one\n";
+          }')
     if [[ -n "$quote_hits" ]]; then
       echo "Error: security-patterns contains quoted prose; paraphrase instead:" >&2
       echo "$quote_hits" >&2

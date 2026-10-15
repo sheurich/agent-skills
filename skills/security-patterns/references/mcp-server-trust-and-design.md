@@ -55,9 +55,9 @@
 - Sources: `hackerone-mcp/main/hackerone_mcp/server.py`, `slither-mcp/main/slither_mcp/pagination.py`, `slither-mcp/main/slither_mcp/tools/get_contract_source.py`
 
 ## Contain every path parameter with canonicalization plus redundant rejection
-- Rule: Resolve both the candidate path and the allowed base directory with `realpath`, require the resolved path to be a strict prefix of the resolved base, and additionally reject a literal `..` segment, a null byte, or a symlink even though resolution already handled them.
+- Rule: Resolve both the candidate path and the allowed base directory with `realpath`. Require the resolved base to be a whole-component ancestor of the resolved candidate, never a raw string prefix. Also reject a literal `..` segment, a null byte, or a symlink, even though resolution already handled them.
 - Threat: A caller-supplied relative path turns a read-this-file tool into arbitrary local file read or write.
-- Mechanism: `validate_path_within_project()` raises `PathTraversalError`. Its docstring says it stops an attacker from escaping the project directory with paths such as `../../../etc/passwd`. `validate_safe_path()` performs the same prefix check, then re-checks `".."`, null bytes, and `os.path.islink` as deliberate belt-and-suspenders.
+- Mechanism: `validate_path_within_project()` raises `PathTraversalError`. Its docstring says it stops an attacker from escaping the project directory with paths such as `../../../etc/passwd`. It requires `os.path.commonpath` of the two resolved paths to equal the base. `validate_safe_path()` instead requires the resolved path to start with the resolved base plus `os.sep`. It then re-checks `".."`, null bytes, and `os.path.islink` as deliberate belt-and-suspenders.
 - Sources: `slither-mcp/main/slither_mcp/types.py`, `anamorpher/main/backend/sanitizer.py`
 
 ## Shell out with an argv list, and never evaluate a tool argument

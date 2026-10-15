@@ -1,9 +1,9 @@
 # Permission and approval gates
 
 ## Prefer an allow-list to a deny-list wherever the legitimate command set is bounded
-- Rule: For a project with a known, small set of legitimate operations, enumerate exactly the read-only inspection, git read, and build/lint/test invocations the agent may run and deny everything else by omission, instead of enumerating known-bad commands to block.
+- Rule: For a project with a known, small set of legitimate operations, pre-approve exactly the commands the agent may run. Cover read-only inspection, git reads, and build, lint, and test invocations. Do not enumerate known-bad commands to block instead. An allow-list only pre-approves; unlisted commands fall back to the active approval mode. In a mode that skips prompts, the list restricts nothing.
 - Threat: A deny-list only stops patterns someone thought to enumerate; every other command is implicitly allowed.
-- Mechanism: `coop`'s contributor-facing `permissions.allow` array lists narrow patterns (`ls:*`, `git status:*`, `git diff:*`, `cargo clippy:*`, `cargo test:*`, `gh pr view:*`, `actionlint:*`) with git mutations limited to `git add`, `git restore --staged`, `git commit`, `git fetch` — no `git push`, no arbitrary shell, no package installs.
+- Mechanism: `coop`'s contributor-facing `permissions.allow` array lists narrow patterns such as `ls:*`, `git status:*`, `git diff:*`, `cargo clippy:*`, `cargo test:*`, `gh pr view:*`, and `actionlint:*`. Its git mutations stop at `git add`, `git restore --staged`, `git commit`, and `git fetch`. It lists no `git push`, no arbitrary shell, and no package installs. The file sets no `deny` rules and no `defaultMode`, so an unlisted command falls to whatever approval mode the user runs.
 - Sources: `coop/main/.claude/settings.json`
 
 ## Block the irreversible-command class at the tool-call boundary
