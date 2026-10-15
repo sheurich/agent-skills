@@ -45,6 +45,48 @@ for package_dir in packages/*/; do
   fi
 done
 
+# --- security-patterns must paraphrase, never quote, its sources ---
+#
+# Fails on any straight or curly double-quoted run of 5 or more words
+# outside backtick code spans, and on any block-quote line, including
+# indented block quotes and block quotes inside list items.
+
+if [[ -d skills/security-patterns ]]; then
+  echo "Checking security-patterns for quoted prose"
+  if ! command -v perl >/dev/null 2>&1; then
+    echo "Warning: perl not found, skipping security-patterns quote check" >&2
+  else
+    # The Perl program is single-quoted on purpose: $text, $1 and $ARGV are
+    # Perl variables, not shell expansions.
+    # shellcheck disable=SC2016
+    quote_hits=$(find skills/security-patterns -type f -name '*.md' -print0 \
+      | xargs -0 perl -CSD -0777 -ne '
+          my $text = $_;
+          my $ln = 0;
+          for my $line (split /\n/, $text, -1) {
+            $ln++;
+            print "$ARGV:$ln: block quote\n"
+              if $line =~ /^\s*(?:(?:[-*+]|\d+[.)])\s+)*>/;
+          }
+          # Blank out code spans, keeping newlines so line numbers hold.
+          $text =~ s{`[^`]*`}{ (my $c = $&) =~ s/[^\n]/ /g; $c }ge;
+          # A quoted run may wrap across lines but not across a blank line.
+          while ($text =~ /["\x{201C}]((?:[^"\x{201C}\x{201D}\n]|\n(?![ \t]*\n))*)["\x{201D}]/g) {
+            my ($q, $at) = ($1, $-[0]);
+            my @w = split " ", $q;
+            next if @w < 5;
+            my $qln = 1 + (substr($text, 0, $at) =~ tr/\n//);
+            (my $one = $q) =~ s/\s+/ /g;
+            print "$ARGV:$qln: quoted run: $one\n";
+          }')
+    if [[ -n "$quote_hits" ]]; then
+      echo "Error: security-patterns contains quoted prose; paraphrase instead:" >&2
+      echo "$quote_hits" >&2
+      errors=$((errors + 1))
+    fi
+  fi
+fi
+
 # --- Pi plugin tests ---
 
 if compgen -G "plugins/auto-summarize/tests/*.test.mjs" >/dev/null; then

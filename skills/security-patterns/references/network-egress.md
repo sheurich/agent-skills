@@ -1,0 +1,25 @@
+# Network egress
+
+## Default-deny egress, allowlist per session, and name what the allowlist leaves open
+- Rule: Disable command network access in the default sandbox profile, and where the harness cannot, build an explicit egress allowlist (resolver, loopback, then only the specific hosts needed) with a default-drop policy re-applied every session; enable it deliberately when reviewing code with possibly malicious dependencies, auditing phone-home behaviour, or doing sensitive work; and treat DNS, other sites on a shared CDN address, unfiltered IPv6, and the container's own ability to rewrite the rules as residual paths.
+- Threat: With default outbound access, a malicious dependency, an injected instruction, or the agent itself can exfiltrate data or fetch further payloads without ever crossing a filesystem boundary.
+- Mechanism: `[permissions.tob-workspace.network] enabled = false` as the Codex default; an `ipset`/`iptables` recipe resolving an explicit hostname allowlist and dropping the rest, with the README's trade-offs list naming the residuals and the threat model noting the container has `NET_ADMIN` plus passwordless sudo.
+- Sources: `codex-config/main/config.toml`, `claude-code-devcontainer/main/README.md`, `claude-code-devcontainer/main/Dockerfile`, `skills/main/plugins/devcontainer-setup/skills/devcontainer-setup/SKILL.md`
+
+## Every listener and port-forward binds loopback
+- Rule: Bind local plumbing for an agent — port-forwards, proxies, MCP servers — to `127.0.0.1` explicitly, refuse an unspecified address at bind, and treat any `0.0.0.0` bind as a review-blocking finding and an invariant to preserve rather than merely current behaviour.
+- Threat: A non-loopback bind turns a single-user tool's internal plumbing into an unauthenticated network service reachable from the local network.
+- Mechanism: `ssh -L 127.0.0.1:<host>:127.0.0.1:<guest>` plus a collision probe. The credential proxy rejects an unspecified address when binding. The reviewer checklist flags a bind to `0.0.0.0` or to any address outside loopback. The counter-example is a demo server ending in `app.run(debug=True, host="0.0.0.0", port=5000)` with unrestricted CORS.
+- Sources: `coop/main/docs/trust-model.md`, `coop/main/docs/ARCHITECTURE.md`, `anamorpher/main/backend/app.py`
+
+## Pin the destination of any privileged network path
+- Rule: Hard-code the upstream host of a credential-bearing proxy or client per provider, forward only a documented narrow set of operations, never let the lower-trust side influence the destination, and enforce destination identity at the application layer with TLS verification and a pinned `Host` header because a port-scoped OS sandbox cannot pin identity.
+- Threat: A compromised client of the path redirects the proxy's authenticated requests, and the credential riding along with them, to an attacker-controlled server.
+- Mechanism: The trust-model describes the path as guarded by a per-instance capability token. It forwards only documented provider-specific operations to a fixed upstream for each provider, and never to a host the guest supplies. It notes that Landlock and Seatbelt both filter by port rather than hostname or IP. Upstream identity is therefore enforced a layer higher, through the proxy's TLS verification and a pinned `Host`, with UDP egress documented as an accepted residual.
+- Sources: `coop/main/docs/trust-model.md`
+
+## Force third-party access through the authenticated path, and turn tool telemetry off centrally
+- Rule: Intercept `WebFetch`, any MCP tool whose name matches fetch, scrape, crawl, or extract, and Bash `curl`/`wget` when the target is a service with an authenticated CLI, deny the call and return the concrete substitute command, reading both singular and batched URL parameters so a batch cannot slip one past; and route every invocation of a third-party analysis tool through a script that cannot omit its privacy flag rather than trusting ad hoc invocations, keeping verbose diagnostics as a separate, clearly labelled opt-in.
+- Threat: A generic HTTP tool bypasses authenticated rate limits, access controls, and audit records; a scanner's default telemetry sends information about the audit target to a vendor, and verbose error reporting routinely captures environment variables.
+- Mechanism: `PreToolUse` matcher `WebFetch|mcp__.*([Ff]etch|[Ss]crape|[Cc]rawl|[Ee]xtract)` plus a Bash regex hook, emitting `permissionDecision: "deny"` with a `gh` substitute, and a `jq` filter reading `.tool_input.url?, .tool_input.urls?, (.tool_input.urls? | arrays | .[])`; the semgrep skill makes `--metrics=off` Essential Principle 1 and generates every command centrally through `scripts/run-scans.sh`; `slither-mcp` collects only tool name and outcome, strips hostname and `sys.argv` in `before_send`, offers a permanent opt-out, and labels `--enhanced-error-reporting` as a separate hazard.
+- Sources: `skills/main/plugins/gh-cli/hooks/hooks.json`, `skills/main/plugins/gh-cli/hooks/intercept-github-fetch.sh`, `skills/main/plugins/static-analysis/skills/semgrep/SKILL.md`, `slither-mcp/main/METRICS.md`, `slither-mcp/main/README.md`
