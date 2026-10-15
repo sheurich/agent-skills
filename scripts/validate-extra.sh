@@ -48,7 +48,8 @@ done
 # --- security-patterns must paraphrase, never quote, its sources ---
 #
 # Fails on any straight or curly double-quoted run of 5 or more words
-# outside backtick code spans, and on any block-quote line.
+# outside backtick code spans, and on any block-quote line, including
+# indented block quotes and block quotes inside list items.
 
 if [[ -d skills/security-patterns ]]; then
   echo "Checking security-patterns for quoted prose"
@@ -61,7 +62,7 @@ if [[ -d skills/security-patterns ]]; then
     quote_hits=$(find skills/security-patterns -type f -name '*.md' -print0 \
       | xargs -0 perl -CSD -ne '
           my $line = $_; chomp $line;
-          print "$ARGV:$.: block quote\n" if $line =~ /^>/;
+          print "$ARGV:$.: block quote\n" if $line =~ /^\s*(?:(?:[-*+]|\d+[.)])\s+)*>/;
           (my $s = $line) =~ s/`[^`]*`/ /g;
           while ($s =~ /["\x{201C}]([^"\x{201C}\x{201D}]*)["\x{201D}]/g) {
             my @w = split " ", $1;
