@@ -16,6 +16,7 @@
       "skills": [
         "./skills/art-direction",
         "./skills/readiness-review",
+        "./skills/security-patterns",
         "./skills/skill-authoring",
         "./skills/semgrep-scan",
         "./skills/swival"

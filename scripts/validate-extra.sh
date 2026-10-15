@@ -45,6 +45,37 @@ for package_dir in packages/*/; do
   fi
 done
 
+# --- security-patterns must paraphrase, never quote, its sources ---
+#
+# Fails on any straight or curly double-quoted run of 5 or more words
+# outside backtick code spans, and on any block-quote line.
+
+if [[ -d skills/security-patterns ]]; then
+  echo "Checking security-patterns for quoted prose"
+  if ! command -v perl >/dev/null 2>&1; then
+    echo "Warning: perl not found, skipping security-patterns quote check" >&2
+  else
+    # The Perl program is single-quoted on purpose: $line, $1 and $ARGV are
+    # Perl variables, not shell expansions.
+    # shellcheck disable=SC2016
+    quote_hits=$(find skills/security-patterns -type f -name '*.md' -print0 \
+      | xargs -0 perl -CSD -ne '
+          my $line = $_; chomp $line;
+          print "$ARGV:$.: block quote\n" if $line =~ /^>/;
+          (my $s = $line) =~ s/`[^`]*`/ /g;
+          while ($s =~ /["\x{201C}]([^"\x{201C}\x{201D}]*)["\x{201D}]/g) {
+            my @w = split " ", $1;
+            print "$ARGV:$.: quoted run: $1\n" if @w >= 5;
+          }
+          close ARGV if eof;')
+    if [[ -n "$quote_hits" ]]; then
+      echo "Error: security-patterns contains quoted prose; paraphrase instead:" >&2
+      echo "$quote_hits" >&2
+      errors=$((errors + 1))
+    fi
+  fi
+fi
+
 # --- Pi plugin tests ---
 
 if compgen -G "plugins/auto-summarize/tests/*.test.mjs" >/dev/null; then
