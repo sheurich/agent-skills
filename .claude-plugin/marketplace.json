@@ -15,6 +15,7 @@
       "strict": false,
       "skills": [
         "./skills/art-direction",
+        "./skills/one-shot",
         "./skills/readiness-review",
         "./skills/security-patterns",
         "./skills/skill-authoring",

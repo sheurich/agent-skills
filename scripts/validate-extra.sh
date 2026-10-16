@@ -87,11 +87,21 @@ if [[ -d skills/security-patterns ]]; then
   fi
 fi
 
-# --- Pi plugin tests ---
+# --- Local one-shot and Pi plugin tests ---
 
-if compgen -G "plugins/auto-summarize/tests/*.test.mjs" >/dev/null; then
-  echo "Running auto-summarize tests"
-  node --test plugins/auto-summarize/tests/*.test.mjs
+if ! command -v node >/dev/null 2>&1; then
+  echo "Error: node not found; required one-shot validation cannot run" >&2
+  errors=$((errors + 1))
+else
+  echo "Running one-shot tests"
+  if ! node --test tests/one-shot.test.mjs; then
+    errors=$((errors + 1))
+  fi
+
+  if compgen -G "plugins/auto-summarize/tests/*.test.mjs" >/dev/null; then
+    echo "Running auto-summarize tests"
+    node --test plugins/auto-summarize/tests/*.test.mjs
+  fi
 fi
 
 # --- marketplace.json checks (require jq) ---
