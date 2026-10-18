@@ -87,14 +87,14 @@ if [[ -d skills/security-patterns ]]; then
   fi
 fi
 
-# --- Local one-shot and Pi plugin tests ---
+# --- Root and Pi plugin tests ---
 
 if ! command -v node >/dev/null 2>&1; then
-  echo "Error: node not found; required one-shot validation cannot run" >&2
+  echo "Error: node not found; required root-test validation cannot run" >&2
   errors=$((errors + 1))
 else
-  echo "Running one-shot tests"
-  if ! node --test tests/one-shot.test.mjs; then
+  echo "Running root tests"
+  if ! node --test tests/*.test.mjs; then
     errors=$((errors + 1))
   fi
 

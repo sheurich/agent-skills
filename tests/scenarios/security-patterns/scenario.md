@@ -169,3 +169,32 @@ showed why that section is there. The agent read the argv rule in
 `references/mcp-server-trust-and-design.md`, then wrote `shell=True` anyway,
 reasoning that the request asked for a shell command. Stating the rule as
 binding, with the observed rationalisations listed, fixed that.
+
+## Deterministic regression: submitted hook/script review (2026-10-17)
+
+These are structural tests of the reference text, not agent behavioral runs or proof that a model follows the instructions. No hooks or scripts from the candidate skill ran; Node executed the repository's structural regression tests. The candidate skill contains 16 Markdown files and no executable hooks.
+
+The tests read `skills/security-patterns/references/supply-chain-of-skills-plugins-and-mcp-servers.md` directly and isolate the section headed “Read every line of every hook and script before accepting a skill”. Runtime assertions check the sentence that gates runtime tests, not safety words elsewhere in the file.
+
+| Phase | Exact command | Exit | Observed result |
+| --- | --- | --- | --- |
+| Baseline, before adding tests or editing the reference | `node --test tests/*.test.mjs` | 0 | 6 passed, 0 failed, 1 optional Pi test skipped |
+| RED, tests added against the unchanged reference | `node --test tests/security-patterns.test.mjs` | 1 | 1 passed, 7 failed, 0 skipped |
+| GREEN, after correcting the Rule and identifying the stricter local requirements in Mechanism | `node --test tests/security-patterns.test.mjs` | 0 | 8 passed, 0 failed, 0 skipped |
+
+RED detected the original “run them locally” directive and missing static-review default, host-execution prohibition, separate explicit operator approval, disposable VM/container, denial of host mounts/credentials/network, and distinction of local requirements from upstream provenance. The preservation test passed in both phases: code-owner approval, version-bump scrutiny, and rejection of undocumented egress, unrelated hooks, obfuscation, and valueless content remained intact.
+
+### Review-loop regression
+
+The validation probe temporarily replaced only the host-execution prohibition with inert prose and restored the reference in `finally`. It executed the repository's test harness, not candidate hooks or scripts. Validation used `npm_config_offline=true`, `npm_config_ignore_scripts=true`, and `UV_OFFLINE=true`.
+
+| Phase | Exact command | Exit | Observed result |
+| --- | --- | --- | --- |
+| Invalid rule before CI wiring | `./validate.sh` | 0 | False green; the direct security-patterns suite exited 1 |
+| New boundary guards before the rule amendment | `node --test tests/security-patterns.test.mjs` | 1 | 8 passed, 4 failed |
+| Invalid rule after CI wiring | `./validate.sh` | 1 | Normal validation detected the missing host-execution prohibition |
+| Candidate-defined isolation guard before the explicit prohibition | `node --test tests/security-patterns.test.mjs` | 1 | 11 passed, 1 failed |
+| Corrected rule | `node --test tests/security-patterns.test.mjs` | 0 | 12 passed, 0 failed |
+| Full root suite | `node --test tests/*.test.mjs` | 0 | 18 passed, 0 failed, 1 optional Pi test skipped |
+
+The new guards require operator-controlled, unprivileged isolation, prohibit candidate-defined isolation, host hooks, and host escape interfaces, and preserve static-only scope. These remain structural checks, not enforcement of a sandbox or proof of model compliance.
