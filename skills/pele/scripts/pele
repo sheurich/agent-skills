@@ -1,0 +1,505 @@
+#!/usr/bin/env bash
+# pele: Validate and render Mermaid diagrams to themeable SVG or standalone HTML via obsidianmd/pele.
+# Uses a version-pinned local cache under ${PELE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pele}/<version>.
+# Bash 3.2-compatible.
+set -euo pipefail
+
+PELE_VERSION="1.6.0"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  pele [options] [input.mmd|-]
+  pele --check [--markdown] [file.mmd|file.md ...]
+
+Render or validate Mermaid diagram syntax using Pele (obsidianmd/pele).
+Reads from [input.mmd], or standard input when omitted or '-'.
+In --check mode, accepts one or more .mmd or Markdown (.md/.markdown/.mdx) files.
+
+Options:
+  -o, --output <file>     Write output to <file> instead of stdout
+  --html                  Output a standalone HTML preview (light/dark CSS + interactive zoom/pan)
+  --title <text>          HTML document title for --html (default: "Pele Diagram")
+  --json                  Output RenderResult JSON ({svg, width, height, type, links})
+  --check                 Validate diagram syntax/semantics only (exits 0 if valid, 1 on PeleError)
+  --markdown              With --check, extract and validate ```mermaid fenced blocks from input
+  --max-width <px>        Maximum available width in pixels for responsive layout adaptation
+  --font-size <px>        Base font size in pixels (default: 16)
+  --padding <px>          Padding around the diagram in pixels
+  --id-prefix <prefix>    Accessibility title/description ID prefix
+  --no-responsive         Disable responsive SVG scaling (responsive: false)
+  --no-auto-direction     Preserve source layout direction on narrow widths (autoDirection: false)
+  --no-links              Disable links in rendered SVG (links: false)
+  --no-images             Disable images in rendered SVG (images: false)
+  -v, --version           Print pinned Pele version and exit
+  -h, --help              Show this help message and exit
+
+Exit codes:
+  0  Success
+  1  Diagram syntax, semantic, or limit error (PeleError), or runtime failure
+  2  CLI usage error
+EOF
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --) break ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -v|--version)
+      printf 'pele %s\n' "$PELE_VERSION"
+      exit 0
+      ;;
+  esac
+done
+
+if ! command -v node >/dev/null 2>&1; then
+  printf 'pele: error: node is required but was not found on PATH.\n' >&2
+  exit 1
+fi
+
+CACHE_BASE="${PELE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pele}"
+PKG_DIR="$CACHE_BASE/$PELE_VERSION"
+ENTRY_ESM="$PKG_DIR/node_modules/pele/dist/pele.js"
+ENTRY_GLOBAL="$PKG_DIR/node_modules/pele/dist/pele.global.js"
+
+if [[ ! -f "$ENTRY_ESM" ]]; then
+  if ! command -v npm >/dev/null 2>&1; then
+    printf 'pele: error: npm is required on PATH to populate cache at %s.\n' "$PKG_DIR" >&2
+    exit 1
+  fi
+  mkdir -p "$PKG_DIR"
+  if [[ ! -f "$PKG_DIR/package.json" ]]; then
+    printf '{"private":true}\n' > "$PKG_DIR/package.json"
+  fi
+  npm install --prefix "$PKG_DIR" --ignore-scripts --no-audit --no-fund --silent "pele@$PELE_VERSION" >/dev/null
+fi
+
+export PELE_ENTRY_ESM="$ENTRY_ESM"
+export PELE_ENTRY_GLOBAL="$ENTRY_GLOBAL"
+export PELE_PINNED_VERSION="$PELE_VERSION"
+
+NODE_SCRIPT=""
+while IFS= read -r line; do
+  NODE_SCRIPT="${NODE_SCRIPT}${line}"$'\n'
+done <<'NODE'
+import fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
+
+const args = process.argv.slice(1);
+let output = null;
+let mode = 'svg';
+let forceMarkdown = false;
+let maxWidth;
+let fontSize;
+let padding;
+let idPrefix;
+let responsive;
+let autoDirection;
+let links;
+let images;
+let title = 'Pele Diagram';
+const positionals = [];
+
+function usageError(msg) {
+  process.stderr.write(`pele: error: ${msg}\nTry 'pele --help' for usage.\n`);
+  process.exit(2);
+}
+
+function parseNumberFlag(flag, val) {
+  if (val === undefined || val === '') usageError(`${flag} requires a numeric value`);
+  const num = Number(val);
+  if (!Number.isFinite(num) || num <= 0) usageError(`${flag} must be a positive number (got '${val}')`);
+  return num;
+}
+
+for (let i = 0; i < args.length; i++) {
+  const arg = args[i];
+  if (arg === '--') {
+    positionals.push(...args.slice(i + 1));
+    break;
+  }
+  switch (arg) {
+    case '-o':
+    case '--output':
+      if (i + 1 >= args.length) usageError(`${arg} requires a file path`);
+      output = args[++i];
+      break;
+    case '--html':
+      if (mode !== 'svg' && mode !== 'html') usageError(`cannot combine --html with --${mode}`);
+      mode = 'html';
+      break;
+    case '--json':
+      if (mode !== 'svg' && mode !== 'json') usageError(`cannot combine --json with --${mode}`);
+      mode = 'json';
+      break;
+    case '--check':
+      if (mode !== 'svg' && mode !== 'check') usageError(`cannot combine --check with --${mode}`);
+      mode = 'check';
+      break;
+    case '--markdown':
+      forceMarkdown = true;
+      break;
+    case '--title':
+      if (i + 1 >= args.length) usageError('--title requires a value');
+      title = args[++i];
+      break;
+    case '--max-width':
+      maxWidth = parseNumberFlag('--max-width', args[++i]);
+      break;
+    case '--font-size':
+      fontSize = parseNumberFlag('--font-size', args[++i]);
+      break;
+    case '--padding':
+      if (i + 1 >= args.length) usageError('--padding requires a numeric value');
+      padding = Number(args[++i]);
+      if (!Number.isFinite(padding) || padding < 0) usageError('--padding must be a non-negative number');
+      break;
+    case '--id-prefix':
+      if (i + 1 >= args.length) usageError('--id-prefix requires a value');
+      idPrefix = args[++i];
+      break;
+    case '--no-responsive':
+      responsive = false;
+      break;
+    case '--no-auto-direction':
+      autoDirection = false;
+      break;
+    case '--no-links':
+      links = false;
+      break;
+    case '--no-images':
+      images = false;
+      break;
+    default:
+      if (arg.startsWith('-') && arg !== '-') {
+        usageError(`unknown option '${arg}'`);
+      }
+      positionals.push(arg);
+      break;
+  }
+}
+
+if (forceMarkdown && mode !== 'check') {
+  usageError('--markdown is only supported with --check (to render SVG or HTML, pass a single .mmd diagram or stdin)');
+}
+
+if (mode !== 'check' && positionals.length > 1) {
+  usageError(`expected at most one input file in --${mode} mode, got ${positionals.length} (use --check to validate multiple files)`);
+}
+
+const peleUrl = pathToFileURL(process.env.PELE_ENTRY_ESM).href;
+const { render, detectType, PeleError } = await import(peleUrl);
+
+const options = {};
+if (maxWidth !== undefined) options.maxWidth = maxWidth;
+if (fontSize !== undefined) options.fontSize = fontSize;
+if (padding !== undefined) options.padding = padding;
+if (idPrefix !== undefined) options.idPrefix = idPrefix;
+if (responsive !== undefined) options.responsive = responsive;
+if (autoDirection !== undefined) options.autoDirection = autoDirection;
+if (links !== undefined) options.links = links;
+if (images !== undefined) options.images = images;
+
+function isPeleError(err) {
+  return err instanceof PeleError || Boolean(err && typeof err.code === 'string' && 'line' in err);
+}
+
+function extractMarkdownMermaidBlocks(markdownText) {
+  const lines = markdownText.split(/\r?\n/);
+  const blocks = [];
+  let inBlock = false;
+  let fenceChar = '';
+  let fenceLen = 0;
+  let indentPrefix = '';
+  let openLine = 0;
+  let currentLines = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!inBlock) {
+      const m = line.match(/^([ \t]*)(`{3,}|~{3,})[ \t]*mermaid(?:[ \t]+.*)?$/i);
+      if (m) {
+        inBlock = true;
+        indentPrefix = m[1];
+        fenceChar = m[2][0];
+        fenceLen = m[2].length;
+        openLine = i + 1;
+        currentLines = [];
+      }
+    } else {
+      const closeRe = new RegExp(`^[ \\t]*\\${fenceChar}{${fenceLen},}[ \\t]*$`);
+      if (closeRe.test(line)) {
+        blocks.push({
+          openLine,
+          contentStartLine: openLine + 1,
+          source: currentLines.join('\n'),
+        });
+        inBlock = false;
+      } else {
+        let stripped = line;
+        if (indentPrefix.length > 0) {
+          let removeCount = 0;
+          while (
+            removeCount < indentPrefix.length &&
+            removeCount < stripped.length &&
+            (stripped[removeCount] === ' ' || stripped[removeCount] === '\t')
+          ) {
+            removeCount++;
+          }
+          stripped = stripped.slice(removeCount);
+        }
+        currentLines.push(stripped);
+      }
+    }
+  }
+
+  if (inBlock) {
+    blocks.push({
+      openLine,
+      contentStartLine: openLine + 1,
+      unclosed: true,
+      source: currentLines.join('\n'),
+    });
+  }
+
+  return blocks;
+}
+
+function readInputSource(inputPath) {
+  if (!inputPath || inputPath === '-') {
+    if (process.stdin.isTTY) {
+      usageError('no input file specified and stdin is a terminal');
+    }
+    return fs.readFileSync(0, 'utf8');
+  }
+  return fs.readFileSync(inputPath, 'utf8');
+}
+
+if (mode === 'check') {
+  const targets = positionals.length > 0 ? positionals : ['-'];
+  const multiTarget = targets.length > 1;
+  let hadError = false;
+  const outLines = [];
+
+  for (const target of targets) {
+    const label = target === '-' ? 'stdin' : target;
+    let text;
+    try {
+      text = readInputSource(target);
+    } catch (err) {
+      process.stderr.write(`pele: error reading ${label}: ${err.message}\n`);
+      hadError = true;
+      continue;
+    }
+
+    const isMd = forceMarkdown || (target !== '-' && /\.(md|markdown|mdx)$/i.test(target));
+    if (isMd) {
+      const blocks = extractMarkdownMermaidBlocks(text);
+      if (blocks.length === 0) {
+        outLines.push(`OK (${label}: 0 mermaid blocks)`);
+        continue;
+      }
+      for (let idx = 0; idx < blocks.length; idx++) {
+        const blk = blocks[idx];
+        const blkNum = idx + 1;
+        if (blk.unclosed) {
+          process.stderr.write(
+            `pele: diagram error in ${label} (block #${blkNum}, line ${blk.openLine}): unclosed mermaid code fence\n`
+          );
+          hadError = true;
+          continue;
+        }
+        try {
+          const res = render(blk.source, options);
+          const detected = res.type || detectType(blk.source) || 'unknown';
+          outLines.push(`OK (${label}:${blk.openLine} #${blkNum} ${detected}, ${res.width}x${res.height})`);
+        } catch (err) {
+          hadError = true;
+          if (isPeleError(err)) {
+            const mdLine = err.line > 0 ? blk.contentStartLine + err.line - 1 : blk.openLine;
+            const loc =
+              err.line > 0
+                ? ` (block #${blkNum} at ${label}:${mdLine}, diagram line ${err.line}, column ${err.column})`
+                : ` (block #${blkNum} at ${label}:${blk.openLine})`;
+            const kind = err.type ? ` [${err.type}/${err.code}]` : ` [${err.code}]`;
+            process.stderr.write(`pele: diagram error${kind}${loc}: ${err.message}\n`);
+            if (err.snippet && !String(err.message).includes(err.snippet)) {
+              process.stderr.write(`${err.snippet}\n`);
+            }
+          } else {
+            process.stderr.write(`pele: unexpected error in ${label}:${blk.openLine}: ${err && err.stack ? err.stack : err}\n`);
+          }
+        }
+      }
+    } else {
+      try {
+        const res = render(text, options);
+        const detected = res.type || detectType(text) || 'unknown';
+        const prefix = multiTarget ? `${label}: ` : '';
+        outLines.push(`OK (${prefix}${detected}, ${res.width}x${res.height})`);
+      } catch (err) {
+        hadError = true;
+        if (isPeleError(err)) {
+          const loc = err.line > 0 ? ` (line ${err.line}, column ${err.column})` : '';
+          const kind = err.type ? ` [${err.type}/${err.code}]` : ` [${err.code}]`;
+          const inFile = multiTarget || target !== '-' ? ` in ${label}` : '';
+          process.stderr.write(`pele: diagram error${inFile}${kind}${loc}: ${err.message}\n`);
+          if (err.snippet && !String(err.message).includes(err.snippet)) {
+            process.stderr.write(`${err.snippet}\n`);
+          }
+        } else {
+          process.stderr.write(`pele: unexpected error: ${err && err.stack ? err.stack : err}\n`);
+        }
+      }
+    }
+  }
+
+  const outText = outLines.length > 0 ? outLines.join('\n') + '\n' : '';
+  if (outText) {
+    try {
+      if (output) {
+        fs.writeFileSync(output, outText, 'utf8');
+      } else {
+        process.stdout.write(outText);
+      }
+    } catch (err) {
+      process.stderr.write(`pele: error writing output: ${err.message}\n`);
+      process.exit(1);
+    }
+  }
+  process.exit(hadError ? 1 : 0);
+}
+
+let source;
+const inputPath = positionals[0];
+try {
+  source = readInputSource(inputPath);
+} catch (err) {
+  process.stderr.write(`pele: error reading input: ${err.message}\n`);
+  process.exit(1);
+}
+
+let result;
+try {
+  result = render(source, options);
+} catch (err) {
+  if (isPeleError(err)) {
+    const loc = err.line > 0 ? ` (line ${err.line}, column ${err.column})` : '';
+    const kind = err.type ? ` [${err.type}/${err.code}]` : ` [${err.code}]`;
+    process.stderr.write(`pele: diagram error${kind}${loc}: ${err.message}\n`);
+    if (err.snippet && !String(err.message).includes(err.snippet)) {
+      process.stderr.write(`${err.snippet}\n`);
+    }
+    process.exit(1);
+  }
+  process.stderr.write(`pele: unexpected error: ${err && err.stack ? err.stack : err}\n`);
+  process.exit(1);
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+let outText;
+if (mode === 'json') {
+  outText = JSON.stringify(result, null, 2) + '\n';
+} else if (mode === 'html') {
+  let globalZoomScript = '';
+  const globalPath = process.env.PELE_ENTRY_GLOBAL;
+  if (globalPath && fs.existsSync(globalPath)) {
+    const rawGlobal = fs.readFileSync(globalPath, 'utf8').replace(/<\/script/gi, '<\\/script');
+    globalZoomScript = `<script>${rawGlobal}\nwindow.addEventListener('DOMContentLoaded', () => {\n  const el = document.getElementById('diagram');\n  if (el && window.pele && typeof window.pele.enableZoom === 'function') {\n    window.pele.enableZoom(el, { always: true });\n  }\n});\n</script>`;
+  }
+  outText = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page-bg: #fffcf0;
+    --page-fg: #100f0f;
+  }
+  .pele {
+    --pele-bg: #fffcf0;
+    --pele-fg: #100f0f;
+    --pele-muted: #6f6e69;
+    --pele-line: #100f0f;
+    --pele-surface: #f2f0e5;
+    --pele-surface-alt: #e6e4d9;
+    --pele-border: #cecdc3;
+    --pele-accent: #205ea6;
+    --pele-critical: #af3029;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page-bg: #100f0f;
+      --page-fg: #cecdc3;
+    }
+    .pele {
+      --pele-bg: #100f0f;
+      --pele-fg: #cecdc3;
+      --pele-muted: #878580;
+      --pele-line: #cecdc3;
+      --pele-surface: #1c1b1a;
+      --pele-surface-alt: #282726;
+      --pele-border: #403e3c;
+      --pele-accent: #4385be;
+      --pele-critical: #d14d41;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: var(--page-bg);
+    color: var(--page-fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  #diagram {
+    position: relative;
+    width: 100%;
+    max-width: ${maxWidth !== undefined ? `${maxWidth}px` : '1200px'};
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+</style>
+</head>
+<body>
+<div id="diagram">${result.svg}</div>
+${globalZoomScript}
+</body>
+</html>
+`;
+} else {
+  outText = result.svg.endsWith('\n') ? result.svg : result.svg + '\n';
+}
+
+try {
+  if (output) {
+    fs.writeFileSync(output, outText, 'utf8');
+  } else {
+    process.stdout.write(outText);
+  }
+} catch (err) {
+  process.stderr.write(`pele: error writing output: ${err.message}\n`);
+  process.exit(1);
+}
+NODE
+
+exec node --input-type=module -e "$NODE_SCRIPT" -- "$@"

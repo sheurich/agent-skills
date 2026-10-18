@@ -23,6 +23,7 @@ npx skills add sheurich/agent-skills -s <skill-name> -g
 | --- | --- |
 | [art-direction](skills/art-direction/SKILL.md) | Develops and adapts visual direction across media before production. |
 | [one-shot](skills/one-shot/SKILL.md) | Owns one software job from an approved brief through testing, independent review, real use, and authorized delivery. |
+| [pele](skills/pele/SKILL.md) | Validate and render Mermaid diagrams to themeable SVG or standalone interactive HTML using Pele. |
 | [readiness-review](skills/readiness-review/SKILL.md) | Structured readiness assessment before proceeding to the next environment or phase. |
 | [security-patterns](skills/security-patterns/SKILL.md) | Security patterns for operating and building LLM coding agents, paraphrased from cited Trail of Bits repositories. Use when hardening a harness, writing a skill, hook, or MCP server, or reviewing agent-related changes. |
 | [semgrep-scan](skills/semgrep-scan/SKILL.md) | Scan changed files with Semgrep for security and correctness issues before committing. |
@@ -69,7 +70,7 @@ gemini-extension.json
 ./validate.sh --skip json  # skip specific checks
 ```
 
-CI runs [agent-validate](https://github.com/sheurich/agent-validate) on
+CI runs [agent-validate](https://github.com/sheurich/agent-skills) on
 every push and pull request.
 
 ## License
