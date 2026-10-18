@@ -49,6 +49,27 @@ test("runtime tests deny host mounts, credentials, and network before execution"
   assert.match(runtimeGate(), /with no host mounts, no credentials, and no network\./);
 });
 
+test("runtime isolation requires operator-controlled, unprivileged configuration", () => {
+  assert.match(runtimeGate(), /under operator-controlled, unprivileged configuration\b/);
+});
+
+test("runtime isolation forbids candidate-defined isolation and host hooks", () => {
+  assert.match(rule, /Do not use candidate-defined isolation, host lifecycle or setup hooks,/);
+});
+
+test("runtime isolation denies added privileges and host escape interfaces", () => {
+  assert.ok(rule.includes(
+    "added privileges or capabilities, host devices or namespaces, or control sockets.",
+  ));
+});
+
+test("runtime prerequisites do not authorize execution or override static-only scope", () => {
+  assert.ok(rule.includes(
+    "These prerequisites do not grant execution permission "
+    + "or override a static-only review or audit scope.",
+  ));
+});
+
 test("hook/script review retains owner approval, version scrutiny, and rejection criteria", () => {
   assert.match(rule, /Require a code owner's approval/);
   assert.match(rule, /apply the same scrutiny to version bumps as to new submissions/i);
