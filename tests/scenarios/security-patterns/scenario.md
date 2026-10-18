@@ -169,3 +169,17 @@ showed why that section is there. The agent read the argv rule in
 `references/mcp-server-trust-and-design.md`, then wrote `shell=True` anyway,
 reasoning that the request asked for a shell command. Stating the rule as
 binding, with the observed rationalisations listed, fixed that.
+
+## Deterministic regression: submitted hook/script review (2026-10-17)
+
+These are structural tests of the reference text, not agent behavioral runs or proof that a model follows the instructions. No submitted hooks or scripts were executed.
+
+The tests read `skills/security-patterns/references/supply-chain-of-skills-plugins-and-mcp-servers.md` directly and isolate the section headed “Read every line of every hook and script before accepting a skill”. Runtime assertions check the sentence that gates runtime tests, not safety words elsewhere in the file.
+
+| Phase | Exact command | Exit | Observed result |
+| --- | --- | --- | --- |
+| Baseline, before adding tests or editing the reference | `node --test tests/*.test.mjs` | 0 | 6 passed, 0 failed, 1 optional Pi test skipped |
+| RED, tests added against the unchanged reference | `node --test tests/security-patterns.test.mjs` | 1 | 1 passed, 7 failed, 0 skipped |
+| GREEN, after correcting the Rule and identifying the stricter local requirements in Mechanism | `node --test tests/security-patterns.test.mjs` | 0 | 8 passed, 0 failed, 0 skipped |
+
+RED detected the original “run them locally” directive and missing static-review default, host-execution prohibition, separate explicit operator approval, disposable VM/container, denial of host mounts/credentials/network, and distinction of local requirements from upstream provenance. The preservation test passed in both phases: code-owner approval, version-bump scrutiny, and rejection of undocumented egress, unrelated hooks, obfuscation, and valueless content remained intact.
